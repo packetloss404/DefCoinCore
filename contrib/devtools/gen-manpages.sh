@@ -1,18 +1,25 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Copyright (c) 2016-2019 The Bitcoin Core developers
+# Distributed under the MIT software license, see the accompanying
+# file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+export LC_ALL=C
 TOPDIR=${TOPDIR:-$(git rev-parse --show-toplevel)}
-SRCDIR=${SRCDIR:-$TOPDIR/src}
+BUILDDIR=${BUILDDIR:-$TOPDIR}
+
+BINDIR=${BINDIR:-$BUILDDIR/src}
 MANDIR=${MANDIR:-$TOPDIR/doc/man}
 
-DEFCOIND=${DEFCOIND:-$SRCDIR/defcoind}
-DEFCOINCLI=${DEFCOINCLI:-$SRCDIR/defcoin-cli}
-DEFCOINTX=${DEFCOINTX:-$SRCDIR/defcoin-tx}
-DEFCOINQT=${DEFCOINQT:-$SRCDIR/qt/defcoin-qt}
+BITCOIND=${BITCOIND:-$BINDIR/litecoind}
+BITCOINCLI=${BITCOINCLI:-$BINDIR/litecoin-cli}
+BITCOINTX=${BITCOINTX:-$BINDIR/litecoin-tx}
+WALLET_TOOL=${WALLET_TOOL:-$BINDIR/litecoin-wallet}
+BITCOINQT=${BITCOINQT:-$BINDIR/qt/litecoin-qt}
 
 [ ! -x $DEFCOIND ] && echo "$DEFCOIND not found or not executable." && exit 1
 
 # The autodetected version git tag can screw up manpage output a little bit
-DTCVER=($($DEFCOINCLI --version | head -n1 | awk -F'[ -]' '{ print $6, $7 }'))
+read -r -a BTCVER <<< "$($BITCOINCLI --version | head -n1 | awk -F'[ -]' '{ print $6, $7 }')"
 
 # Create a footer file with copyright content.
 # This gets autodetected fine for bitcoind if --version-string is not set,
@@ -20,7 +27,7 @@ DTCVER=($($DEFCOINCLI --version | head -n1 | awk -F'[ -]' '{ print $6, $7 }'))
 echo "[COPYRIGHT]" > footer.h2m
 $DEFCOIND --version | sed -n '1!p' >> footer.h2m
 
-for cmd in $DEFCOIND $DEFCOINCLI $DEFCOINTX $DEFCOINQT; do
+for cmd in $BITCOIND $BITCOINCLI $BITCOINTX $WALLET_TOOL $BITCOINQT; do
   cmdname="${cmd##*/}"
   help2man -N --version-string=${DTCVER[0]} --include=footer.h2m -o ${MANDIR}/${cmdname}.1 ${cmd}
   sed -i "s/\\\-${DTCVER[1]}//g" ${MANDIR}/${cmdname}.1

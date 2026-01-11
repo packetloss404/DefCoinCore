@@ -1,35 +1,27 @@
-<!--- Remove sections that do not apply -->
+<!-- This issue tracker is only for technical issues related to Litecoin Core.
 
-This issue tracker is only for technical issues related to defcoin-core.
+General litecoin questions and/or support requests and are best directed to the [litecointalk.io forums](https://litecointalk.io/).
 
-General defcoin questions and/or support requests and are best directed to the [defcoin reddit forums](https://reddit.com/r/defcoin/).
+For reporting security issues, please contact the Litecoin developers on the #litecoin-dev Freenode IRC channel or alternatively you can email us at contact@litecoin.org.
 
-### Describe the issue
+If the node is "stuck" during sync or giving "block checksum mismatch" errors, please ensure your hardware is stable by running memtest and observe CPU temperature with a load-test tool such as linpack before creating an issue!
 
-### Can you reliably reproduce the issue?
-#### If so, please list the steps to reproduce below:
-1.
-2.
-3.
+Any report, issue or feature request related to the GUI should be reported at
+https://github.com/bitcoin-core/gui/issues/
+-->
 
-### Expected behaviour
-Tell us what should happen
+<!-- Describe the issue -->
+<!--- What behavior did you expect? -->
 
-### Actual behaviour
-Tell us what happens instead
+<!--- What was the actual behavior (provide screenshots if the issue is GUI-related)? -->
 
-### Screenshots.
-If the issue is related to the GUI, screenshots can be added to this issue via drag & drop.
+<!--- How reliably can you reproduce the issue, what are the steps to do so? -->
 
-### What version of defcoin-core are you using?
-List the version number/commit ID, and if it is an official binary, self compiled or a distribution package such as PPA.
+<!-- What version of Litecoin Core are you using, where did you get it (website, self-compiled, etc)? -->
 
-### Machine specs:
-- OS:
-- CPU:
-- RAM:
-- Disk size:
-- Disk Type (HD/SDD):
+<!-- What type of machine are you observing the error on (OS/CPU and disk type)? -->
 
-### Any extra information that might be useful in the debugging process.
-This is normally the contents of a `debug.log` or `config.log` file. Raw text or a link to a pastebin type site are preferred.
+<!-- GUI-related issue? What is your operating system and its version? If Linux, what is your desktop environment and graphical shell? -->
+
+<!-- Any extra information that might be useful in the debugging process. -->
+<!--- This is normally the contents of a `debug.log` or `config.log` file. Raw text or a link to a pastebin type site are preferred. -->

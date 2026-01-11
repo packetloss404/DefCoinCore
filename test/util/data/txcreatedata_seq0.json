@@ -1,9 +1,10 @@
 {
-    "txid": "43856a2793950e35d2c90fee95fe2132578b9bcbee055435fb1025e3cd6c1d15",
-    "hash": "43856a2793950e35d2c90fee95fe2132578b9bcbee055435fb1025e3cd6c1d15",
+    "txid": "6d91ec40ccf2f0e1f4aad31d7a2eaeff34be2f78a743ce938eb285efbcafc3cd",
+    "hash": "6d91ec40ccf2f0e1f4aad31d7a2eaeff34be2f78a743ce938eb285efbcafc3cd",
     "version": 2,
     "size": 85,
     "vsize": 85,
+    "weight": 340,
     "locktime": 0,
     "vin": [
         {
@@ -21,15 +22,15 @@
             "value": 0.00200000,
             "n": 0,
             "scriptPubKey": {
-                "asm": "OP_DUP OP_HASH160 9f69a2899dfd534eddeb8ec7d533f465f063dc22 OP_EQUALVERIFY OP_CHECKSIG",
-                "hex": "76a9149f69a2899dfd534eddeb8ec7d533f465f063dc2288ac",
+                "asm": "OP_DUP OP_HASH160 f9bbbf34117bfd1384c0708a13509f5599bb49e7 OP_EQUALVERIFY OP_CHECKSIG",
+                "hex": "76a914f9bbbf34117bfd1384c0708a13509f5599bb49e788ac",
                 "reqSigs": 1,
                 "type": "pubkeyhash",
                 "addresses": [
-                    "DKfzXQG7RiH3wE9tNJEKd3PK3UdgQshoTP"
+                    "LhzRRruapBx5gEtAf9RuVEePrzcG1wxRYa"
                 ]
             }
         }
     ],
-    "hex": "0200000001efc59c584fb0be1066baf08b93f8baf0d9b9beaafcdd318a59cda6302dc1e9690000000000fdffffff01400d0300000000001976a9149f69a2899dfd534eddeb8ec7d533f465f063dc2288ac00000000"
+    "hex": "0200000001efc59c584fb0be1066baf08b93f8baf0d9b9beaafcdd318a59cda6302dc1e9690000000000fdffffff01400d0300000000001976a914f9bbbf34117bfd1384c0708a13509f5599bb49e788ac00000000"
 }
