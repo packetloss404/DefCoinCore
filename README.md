@@ -113,6 +113,44 @@ make install  # optional
 - `defcoin-tx` - Transaction utility
 - `defcoin-wallet` - Wallet utility
 
+Consensus Parameters
+--------------------
+
+Defcoin 2.0 maintains full compatibility with the original Defcoin chain. Some newer Bitcoin/Litecoin features are disabled to preserve consensus.
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Block Time | 2 minutes | 120 seconds target |
+| Difficulty Retarget | 720 blocks | ~1 day |
+| PoW Algorithm | Scrypt (1024,1,1) | Memory-hard, ASIC-resistant |
+| Initial Block Reward | 50 DFC | |
+| Halving Interval | 840,000 blocks | ~3.2 years |
+| Max Supply | ~84 million DFC | |
+
+### Enabled Features
+
+| Feature | Status | Since |
+|---------|--------|-------|
+| P2SH (BIP16) | **Enabled** | Genesis |
+| BIP34 (Height in Coinbase) | **Enabled** | Block 710,000 |
+
+### Disabled Features
+
+These features are disabled to maintain chain compatibility with Defcoin 1.x:
+
+| Feature | Status | Reason |
+|---------|--------|--------|
+| SegWit (BIP141) | Disabled | Never activated on original chain |
+| CSV (BIP68/112/113) | Disabled | Never activated on original chain |
+| BIP65 (CLTV) | Disabled | Never activated on original chain |
+| BIP66 (Strict DER) | Disabled | Never activated on original chain |
+| Taproot (BIP340/341) | Disabled | Requires SegWit |
+| MWEB (Mimblewimble) | Disabled | New feature, may enable in v2.1+ |
+
+> **Note:** These features were never activated on the original Defcoin network during
+> the BIP9 signaling period (2018-2019). Enabling them now would break consensus with
+> the existing chain. Future soft-fork activation may be considered for new features.
+
 Network Information
 -------------------
 
