@@ -42,17 +42,25 @@ static const int TOOLTIP_WRAP_THRESHOLD = 80;
 /* Number of frames in spinner animation */
 #define SPINNER_FRAMES 36
 
-#define QAPP_ORG_NAME "Litecoin"
-#define QAPP_ORG_DOMAIN "litecoin.org"
-#define QAPP_APP_NAME_DEFAULT "Litecoin-Qt"
-#define QAPP_APP_NAME_TESTNET "Liteocin-Qt-testnet"
-#define QAPP_APP_NAME_SIGNET "Litecoin-Qt-signet"
-#define QAPP_APP_NAME_REGTEST "Litecoin-Qt-regtest"
+#define QAPP_ORG_NAME "Defcoin"
+#define QAPP_ORG_DOMAIN "defcoin.io"
+#define QAPP_APP_NAME_DEFAULT "Defcoin-Qt"
+#define QAPP_APP_NAME_TESTNET "Defcoin-Qt-testnet"
+#define QAPP_APP_NAME_SIGNET "Defcoin-Qt-signet"
+#define QAPP_APP_NAME_REGTEST "Defcoin-Qt-regtest"
 
 /* One gigabyte (GB) in bytes */
 static constexpr uint64_t GB_BYTES{1000000000};
 
 // Default prune target displayed in GUI.
 static constexpr int DEFAULT_PRUNE_TARGET_GB{2};
+
+/* Theme options */
+enum AppTheme {
+    THEME_SYSTEM = 0,
+    THEME_LIGHT = 1,
+    THEME_DARK = 2
+};
+static constexpr int DEFAULT_THEME = THEME_DARK;
 
 #endif // BITCOIN_QT_GUICONSTANTS_H
