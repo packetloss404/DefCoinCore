@@ -1,0 +1,103 @@
+name: Build Defcoin
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libtool autotools-dev automake pkg-config \
+            bsdmainutils curl git nsis \
+            g++-mingw-w64-x86-64 mingw-w64-x86-64-dev
+
+      - name: Set MinGW to POSIX threading
+        run: |
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+
+      - name: Build depends
+        run: |
+          cd depends
+          make HOST=x86_64-w64-mingw32 -j$(nproc)
+
+      - name: Configure
+        run: |
+          ./autogen.sh
+          CONFIG_SITE=$PWD/depends/x86_64-w64-mingw32/share/config.site ./configure --prefix=/
+
+      - name: Build
+        run: make -j$(nproc)
+
+      - name: Package binaries
+        run: |
+          mkdir -p release
+          cp src/defcoind.exe release/ || true
+          cp src/defcoin-cli.exe release/ || true
+          cp src/defcoin-tx.exe release/ || true
+          cp src/defcoin-wallet.exe release/ || true
+          cp src/qt/defcoin-qt.exe release/ || true
+          cp COPYING release/
+          cp README.md release/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: defcoin-win64
+          path: release/
+          retention-days: 30
+
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libtool autotools-dev automake pkg-config \
+            bsdmainutils curl git \
+            libssl-dev libevent-dev libboost-all-dev \
+            libdb-dev libdb++-dev \
+            libminiupnpc-dev libzmq3-dev \
+            libqt5gui5 libqt5core5a libqt5dbus5 qttools5-dev qttools5-dev-tools \
+            libqrencode-dev
+
+      - name: Configure
+        run: |
+          ./autogen.sh
+          ./configure --with-incompatible-bdb
+
+      - name: Build
+        run: make -j$(nproc)
+
+      - name: Package binaries
+        run: |
+          mkdir -p release
+          cp src/defcoind release/ || true
+          cp src/defcoin-cli release/ || true
+          cp src/defcoin-tx release/ || true
+          cp src/defcoin-wallet release/ || true
+          cp src/qt/defcoin-qt release/ || true
+          cp COPYING release/
+          cp README.md release/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: defcoin-linux-x64
+          path: release/
+          retention-days: 30
