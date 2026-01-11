@@ -47,6 +47,7 @@
 #include <QLibraryInfo>
 #include <QLocale>
 #include <QMessageBox>
+#include <QFile>
 #include <QSettings>
 #include <QThread>
 #include <QTimer>
@@ -223,6 +224,36 @@ void BitcoinApplication::setupPlatformStyle()
     if (!platformStyle) // Fall back to "other" if specified name not found
         platformStyle = PlatformStyle::instantiate("other");
     assert(platformStyle);
+}
+
+void BitcoinApplication::loadTheme(int theme)
+{
+    QString styleSheet;
+    QString themeFile;
+
+    switch (theme) {
+        case THEME_LIGHT:
+            themeFile = ":/styles/light";
+            break;
+        case THEME_DARK:
+            themeFile = ":/styles/dark";
+            break;
+        case THEME_SYSTEM:
+        default:
+            // For system theme, check if system prefers dark mode
+            // On Windows/macOS, Qt 5.12+ provides palette hints
+            // For now, default to dark theme as fallback
+            themeFile = ":/styles/dark";
+            break;
+    }
+
+    QFile file(themeFile);
+    if (file.open(QFile::ReadOnly | QFile::Text)) {
+        styleSheet = QLatin1String(file.readAll());
+        file.close();
+    }
+
+    setStyleSheet(styleSheet);
 }
 
 BitcoinApplication::~BitcoinApplication()
@@ -600,6 +631,10 @@ int GuiMain(int argc, char* argv[])
     GUIUtil::LogQtInfo();
     // Load GUI settings from QSettings
     app.createOptionsModel(gArgs.GetBoolArg("-resetguisettings", false));
+
+    // Load theme from settings and connect to theme changes
+    app.loadTheme(app.getOptionsModel()->getTheme());
+    QObject::connect(app.getOptionsModel(), &OptionsModel::themeChanged, &app, &BitcoinApplication::loadTheme);
 
     if (did_show_intro) {
         // Store intro dialog settings other than datadir (network specific)

@@ -89,6 +89,11 @@ public:
 
     /// Setup platform style
     void setupPlatformStyle();
+    /// Load and apply theme stylesheet
+    void loadTheme(int theme);
+
+    /// Get options model
+    OptionsModel* getOptionsModel() const { return optionsModel; }
 
     interfaces::Node& node() const { assert(m_node); return *m_node; }
     void setNode(interfaces::Node& node);

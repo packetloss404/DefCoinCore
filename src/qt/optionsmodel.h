@@ -58,6 +58,7 @@ public:
         DisplayUnit,            // BitcoinUnits::Unit
         ThirdPartyTxUrls,       // QString
         Language,               // QString
+        Theme,                  // int (0=System, 1=Light, 2=Dark)
         CoinControlFeatures,    // bool
         MWEBFeatures,           // bool
         ThreadsScriptVerif,     // int
@@ -86,6 +87,7 @@ public:
     QString getThirdPartyTxUrls() const { return strThirdPartyTxUrls; }
     bool getCoinControlFeatures() const { return fCoinControlFeatures; }
     bool getMWEBFeatures() const { return fMWEBFeatures; }
+    int getTheme() const { return nTheme; }
     const QString& getOverriddenByCommandLine() { return strOverriddenByCommandLine; }
 
     /* Explicit setters */
@@ -110,6 +112,7 @@ private:
     QString strThirdPartyTxUrls;
     bool fCoinControlFeatures;
     bool fMWEBFeatures;
+    int nTheme;  // 0=System, 1=Light, 2=Dark
     /* settings that were overridden by command-line */
     QString strOverriddenByCommandLine;
 
@@ -123,6 +126,7 @@ Q_SIGNALS:
     void coinControlFeaturesChanged(bool);
     void mwebFeaturesChanged(bool);
     void hideTrayIconChanged(bool);
+    void themeChanged(int theme);
 };
 
 #endif // BITCOIN_QT_OPTIONSMODEL_H

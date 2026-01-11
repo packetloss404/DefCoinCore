@@ -112,6 +112,11 @@ OptionsDialog::OptionsDialog(QWidget *parent, bool enableWallet) :
     }
     ui->unit->setModel(new BitcoinUnits(this));
 
+    /* Theme selection */
+    ui->theme->addItem(tr("System Default"), QVariant(THEME_SYSTEM));
+    ui->theme->addItem(tr("Light"), QVariant(THEME_LIGHT));
+    ui->theme->addItem(tr("Dark"), QVariant(THEME_DARK));
+
     /* Widget-to-option mapper */
     mapper = new QDataWidgetMapper(this);
     mapper->setSubmitPolicy(QDataWidgetMapper::ManualSubmit);
@@ -240,6 +245,7 @@ void OptionsDialog::setMapper()
 
     /* Display */
     mapper->addMapping(ui->lang, OptionsModel::Language);
+    mapper->addMapping(ui->theme, OptionsModel::Theme);
     mapper->addMapping(ui->unit, OptionsModel::DisplayUnit);
     mapper->addMapping(ui->thirdPartyTxUrls, OptionsModel::ThirdPartyTxUrls);
 }

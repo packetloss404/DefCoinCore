@@ -84,6 +84,11 @@ void OptionsModel::Init(bool resetSettings)
         settings.setValue("fMWEBFeatures", false);
     fMWEBFeatures = settings.value("fMWEBFeatures", false).toBool() && gArgs.IsArgSet("-debug");
 
+    // Theme (0=System, 1=Light, 2=Dark)
+    if (!settings.contains("nTheme"))
+        settings.setValue("nTheme", DEFAULT_THEME);
+    nTheme = settings.value("nTheme", DEFAULT_THEME).toInt();
+
     // These are shared with the core or have a command-line parameter
     // and we want command-line parameters to overwrite the GUI settings.
     //
@@ -315,6 +320,8 @@ QVariant OptionsModel::data(const QModelIndex & index, int role) const
             return strThirdPartyTxUrls;
         case Language:
             return settings.value("language");
+        case Theme:
+            return nTheme;
         case CoinControlFeatures:
             return fCoinControlFeatures;
         case MWEBFeatures:
@@ -440,6 +447,13 @@ bool OptionsModel::setData(const QModelIndex & index, const QVariant & value, in
             if (settings.value("language") != value) {
                 settings.setValue("language", value);
                 setRestartRequired(true);
+            }
+            break;
+        case Theme:
+            if (nTheme != value.toInt()) {
+                nTheme = value.toInt();
+                settings.setValue("nTheme", nTheme);
+                Q_EMIT themeChanged(nTheme);
             }
             break;
         case CoinControlFeatures:
