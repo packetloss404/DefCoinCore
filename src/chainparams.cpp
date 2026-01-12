@@ -130,13 +130,8 @@ public:
         // This is fine at runtime as we'll fall back to using them as an addrfetch if they don't support the
         // service bits we want, but we should get them updated to support all service bits wanted by any
         // release ASAP to avoid it where possible.
-        // DEFCOIN: DNS seeds disabled until seed.defcoin.io is set up
-        // vSeeds.emplace_back("seed.defcoin.io");
-        // vSeeds.emplace_back("seed2.defcoin.io");
-        // Using hardcoded seeds in chainparamsseeds.h instead:
-        // 45.76.28.234:1337
-        // 45.76.230.74:1337
-        // 73.52.182.204:1337
+        vSeeds.emplace_back("seed.defcoin.io");
+        vSeeds.emplace_back("seed2.defcoin.io");
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,30); // DEFCOIN: addresses start with 'D'
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,5);
