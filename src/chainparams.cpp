@@ -101,10 +101,12 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = 1553212800; // March 13, 2019
 
         // The best chain should have at least this much work.
-        consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000000000014e2d9c7eb63c6");
+        // Updated 2026-01-11 to match current chain state
+        consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000702edaa57d42a9fd9e2");
 
         // By default assume that the signatures in ancestors of this block are valid.
-        consensus.defaultAssumeValid = uint256S("0x4a21187ff56cb657d441cba499daa700e74ebe0d90c7accdd5f22b9958df41f8"); //828691
+        // Updated 2026-01-11 to block 2186382
+        consensus.defaultAssumeValid = uint256S("0x62e2e3d21343a00994d38a63524867507dbeee6850e8fbf02e9c47a3ccf82f24"); // 2186382
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.
@@ -124,9 +126,8 @@ public:
         assert(genesis.hashMerkleRoot == uint256S("0x7294da28c1b8eeba868388b14e2205874fb512f0ca31c2f583002557175f2c9c"));
 
         // Note that of those with the service bits flag, most only support a subset of possible options
-        vSeeds.emplace_back("seed.defcoin-ng.org", false);
-        vSeeds.emplace_back("seed2.defcoin-ng.org", false);
-        vSeeds.emplace_back("seed.defcoin.mikej.tech", false);
+        vSeeds.emplace_back("seed.defcoin.io", false);
+        vSeeds.emplace_back("seed2.defcoin.io", false);
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,30);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,5);
@@ -159,15 +160,18 @@ public:
                 {456000, uint256S("0xd31bd54f4c856cccb1edb8588ad6748b02e7de3a7bdc0340a2ab2ab31100e011")},
                 {638902, uint256S("0xdc0a1fbe223f4bd64c51cef0dcd10dabe11e4a7370b433e7942f7ad2fcb94447")},
                 {721000, uint256S("0x9623f4c4e3277eeecf7575d2dff3348b453395a489ce5888dcfe939a92bcf04d")},
+                // Added 2026-01-11 - matches defaultAssumeValid
+                {2186382, uint256S("0x62e2e3d21343a00994d38a63524867507dbeee6850e8fbf02e9c47a3ccf82f24")},
             }
         };
 
         chainTxData = ChainTxData{
-            // Data as of block fb19a974735c8f826084d36d6c4f7664e9a571733d4d7ebf3d06aacc4aca78de (height 828327).
-            1520971249, // * UNIX timestamp of last known number of transactions
-            473561,  // * total number of transactions between genesis and that timestamp
-                    //   (the tx=... number in the SetBestChain debug.log lines)
-            0.06     // * estimated number of transactions per second after that timestamp
+            // Data as of block 62e2e3d21343a00994d38a63524867507dbeee6850e8fbf02e9c47a3ccf82f24 (height 2186382)
+            // Updated 2026-01-11
+            1551355823, // * UNIX timestamp of last known number of transactions
+            798434,     // * total number of transactions between genesis and that timestamp
+                        //   (the tx=... number in the SetBestChain debug.log lines)
+            0.01        // * estimated number of transactions per second after that timestamp
         };
     }
 };
