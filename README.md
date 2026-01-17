@@ -1,7 +1,7 @@
 Defcoin Core 2.0.0
 ==================
 
-[![Build Status](https://github.com/packetloss404/defcoin/actions/workflows/build.yml/badge.svg)](https://github.com/packetloss404/defcoin/actions)
+[![Build Status](https://github.com/packetloss404/DefCoinCore/actions/workflows/build.yml/badge.svg)](https://github.com/packetloss404/DefCoinCore/actions)
 
 https://www.defcoin.io
 
@@ -168,8 +168,8 @@ The `main` branch contains the latest stable release. Development happens in
 feature branches.
 
 - Original Defcoin: https://github.com/mspicer/defcoin
-- Defcoin 2.0: https://github.com/packetloss404/defcoin
-- Issues: https://github.com/packetloss404/defcoin/issues
+- Defcoin 2.0: https://github.com/packetloss404/DefCoinCore
+- Issues: https://github.com/packetloss404/DefCoinCore/issues
 
 Testing
 -------
