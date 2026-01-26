@@ -3223,7 +3223,7 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
             LogPrint(BCLog::NET, "Unexpected cmpctblock message received from peer %d\n", pfrom.GetId());
             return;
         }
-		
+
         {
             LOCK(cs_main);
             CBlockIndex* pTip = ::ChainActive().Tip();
@@ -3237,6 +3237,22 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
         vRecv >> cmpctblock;
 
         bool received_new_header = false;
+
+        // When we succeed in decoding a block's txids from a cmpctblock
+        // message we typically jump to the BLOCKTXN handling code, with a
+        // dummy (empty) BLOCKTXN message, to re-use the logic there in
+        // completing processing of the putative block (without cs_main).
+        bool fProcessBLOCKTXN = false;
+        CDataStream blockTxnMsg(SER_NETWORK, PROTOCOL_VERSION);
+
+        // If we end up treating this as a plain headers message, call that as well
+        // without cs_main.
+        bool fRevertToHeaderProcessing = false;
+
+        // Keep a CBlock for "optimistic" compactblock reconstructions (see
+        // below)
+        std::shared_ptr<CBlock> pblock = std::make_shared<CBlock>();
+        bool fBlockReconstructed = false;
 
         {
         LOCK(cs_main);
@@ -3260,22 +3276,6 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
                 return;
             }
         }
-
-        // When we succeed in decoding a block's txids from a cmpctblock
-        // message we typically jump to the BLOCKTXN handling code, with a
-        // dummy (empty) BLOCKTXN message, to re-use the logic there in
-        // completing processing of the putative block (without cs_main).
-        bool fProcessBLOCKTXN = false;
-        CDataStream blockTxnMsg(SER_NETWORK, PROTOCOL_VERSION);
-
-        // If we end up treating this as a plain headers message, call that as well
-        // without cs_main.
-        bool fRevertToHeaderProcessing = false;
-
-        // Keep a CBlock for "optimistic" compactblock reconstructions (see
-        // below)
-        std::shared_ptr<CBlock> pblock = std::make_shared<CBlock>();
-        bool fBlockReconstructed = false;
 
         {
         LOCK2(cs_main, g_cs_orphans);
@@ -3401,7 +3401,8 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
                 fRevertToHeaderProcessing = true;
             }
         }
-        } // cs_main
+        } // LOCK2(cs_main, g_cs_orphans)
+        } // LOCK(cs_main)
 
         if (fProcessBLOCKTXN) {
             return ProcessMessage(pfrom, NetMsgType::BLOCKTXN, blockTxnMsg, time_received, interruptMsgProc);
