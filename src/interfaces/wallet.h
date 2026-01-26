@@ -165,6 +165,12 @@ public:
     //! Abandon transaction.
     virtual bool abandonTransaction(const uint256& txid) = 0;
 
+    //! Return whether transaction can be rebroadcast.
+    virtual bool transactionCanBeRebroadcast(const uint256& txid) = 0;
+
+    //! Rebroadcast transaction.
+    virtual bool rebroadcastTransaction(const uint256& txid, std::string& err_string) = 0;
+
     //! Return whether transaction can be bumped.
     virtual bool transactionCanBeBumped(const uint256& txid) = 0;
 
