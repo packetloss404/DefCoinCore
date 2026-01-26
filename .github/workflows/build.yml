@@ -101,3 +101,44 @@ jobs:
           name: defcoin-linux-x64
           path: release/
           retention-days: 30
+
+  build-macos:
+    runs-on: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install automake libtool pkg-config miniupnpc openssl@3 libevent boost berkeley-db@4 qt@5 qrencode
+
+      - name: Configure
+        run: |
+          ./autogen.sh
+          ./configure --with-gui=qt5 \
+            --with-boost=$(brew --prefix boost) \
+            --with-miniupnpc=$(brew --prefix miniupnpc) \
+            PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix qt@5)/lib/pkgconfig" \
+            LDFLAGS="-L$(brew --prefix openssl@3)/lib -L$(brew --prefix berkeley-db@4)/lib" \
+            CPPFLAGS="-I$(brew --prefix openssl@3)/include -I$(brew --prefix berkeley-db@4)/include"
+
+      - name: Build
+        run: make -j$(sysctl -n hw.ncpu)
+
+      - name: Package binaries
+        run: |
+          mkdir -p release
+          cp src/defcoind release/ || true
+          cp src/defcoin-cli release/ || true
+          cp src/defcoin-tx release/ || true
+          cp src/defcoin-wallet release/ || true
+          cp src/qt/defcoin-qt release/ || true
+          cp COPYING release/
+          cp README.md release/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: defcoin-macos-x64
+          path: release/
+          retention-days: 30
