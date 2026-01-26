@@ -60,6 +60,12 @@ All security patches from Litecoin 0.21.4 have been backported:
 - **Improved Tor support**: Better privacy options
 - **BIP155 (addrv2)**: Support for next-gen network addresses
 
+### GUI Improvements
+- **Transaction rebroadcast**: Right-click unconfirmed transactions to rebroadcast
+- **Console export**: Save console history to file (Ctrl+S)
+- **Node uptime display**: See how long your node has been running
+- **Average peer ping**: Network health indicator in Information tab
+
 ### Developer Features
 - **Updated RPC API**: New commands and improved responses
 - **Better logging**: More detailed debug information
