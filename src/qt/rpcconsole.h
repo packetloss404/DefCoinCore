@@ -79,6 +79,8 @@ private Q_SLOTS:
     void on_tabWidget_currentChanged(int index);
     /** open the debug.log from the current datadir */
     void on_openDebugLogfileButton_clicked();
+    /** export console history to file */
+    void on_exportButton_clicked();
     /** change the time range of the network traffic graph */
     void on_sldGraphRange_valueChanged(int value);
     /** update traffic statistics */
@@ -165,9 +167,14 @@ private:
     QCompleter *autoCompleter = nullptr;
     QThread thread;
     WalletModel* m_last_wallet_model{nullptr};
+    QTimer *statsTimer{nullptr};
 
     /** Update UI with latest network info from model. */
     void updateNetworkState();
+    /** Update uptime display */
+    void updateUptime();
+    /** Update peer statistics */
+    void updatePeerStats();
 
 private Q_SLOTS:
     void updateAlerts(const QString& warnings);

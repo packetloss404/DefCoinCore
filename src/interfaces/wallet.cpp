@@ -346,6 +346,26 @@ public:
         LOCK(m_wallet->cs_wallet);
         return m_wallet->AbandonTransaction(txid);
     }
+    bool transactionCanBeRebroadcast(const uint256& txid) override
+    {
+        LOCK(m_wallet->cs_wallet);
+        auto it = m_wallet->mapWallet.find(txid);
+        if (it == m_wallet->mapWallet.end()) return false;
+        const CWalletTx& wtx = it->second;
+        // Can only rebroadcast unconfirmed, non-abandoned, non-conflicted transactions
+        return wtx.GetDepthInMainChain() == 0 && !wtx.isAbandoned() && !wtx.IsCoinBase();
+    }
+    bool rebroadcastTransaction(const uint256& txid, std::string& err_string) override
+    {
+        LOCK(m_wallet->cs_wallet);
+        auto it = m_wallet->mapWallet.find(txid);
+        if (it == m_wallet->mapWallet.end()) {
+            err_string = "Transaction not found";
+            return false;
+        }
+        CWalletTx& wtx = it->second;
+        return wtx.SubmitMemoryPoolAndRelay(err_string, true);
+    }
     bool transactionCanBeBumped(const uint256& txid) override
     {
         return feebumper::TransactionCanBeBumped(*m_wallet.get(), txid);
