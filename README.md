@@ -16,7 +16,7 @@ block times and a simple, predictable monetary policy.
 - 2-minute block time (faster than Bitcoin/Litecoin)
 - Scrypt proof-of-work algorithm
 - 50 DFC initial block reward with halving schedule
-- Based on Litecoin 0.21.x codebase for modern features
+- Based on Litecoin 0.21.x codebase with 0.21.4 security patches
 
 Defcoin Core is the reference implementation that enables the use of this currency.
 
@@ -40,9 +40,14 @@ Defcoin Core 2.0.0 is a major upgrade rebased from Litecoin 0.15.x to Litecoin 0
 - **Compact block relay**: Faster block propagation across the network
 
 ### Security Fixes
-- Fixes for CVE-2023-33297 and CVE-2024-35202
+All security patches from Litecoin 0.21.4 have been backported:
+- **CVE-2023-33297**: Remote peer crash vulnerability
+- **CVE-2024-35202**: Blocktxn message DoS (FillBlock assertion crash)
+- **Mutated blocks fix**: Prevents peers from interfering with block relay
+- **Miniupnpc 2.2.2**: Fixes infinite loop vulnerability (local network DoS)
 - Improved peer connection handling
 - Better DoS protection
+- Reduced network fingerprinting
 
 ### Wallet Improvements
 - **Descriptor wallets**: Modern wallet architecture (optional)
@@ -197,6 +202,6 @@ Credits
 -------
 
 Defcoin Core 2.0.0 is based on:
-- [Litecoin Core](https://github.com/litecoin-project/litecoin) 0.21.x
+- [Litecoin Core](https://github.com/litecoin-project/litecoin) 0.21.x (with 0.21.4 security patches)
 - [Bitcoin Core](https://github.com/bitcoin/bitcoin)
 - Original [Defcoin](https://github.com/mspicer/defcoin) by mspicer
