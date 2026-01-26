@@ -29,6 +29,7 @@
 #include <wallet/wallet.h>
 #endif
 
+#include <QFileDialog>
 #include <QFont>
 #include <QKeyEvent>
 #include <QMenu>
@@ -38,6 +39,7 @@
 #include <QSettings>
 #include <QString>
 #include <QStringList>
+#include <QTextStream>
 #include <QTime>
 #include <QTimer>
 
@@ -502,6 +504,12 @@ RPCConsole::RPCConsole(interfaces::Node& node, const PlatformStyle *_platformSty
     consoleFontSize = settings.value(fontSizeSettingsKey, QFont().pointSize()).toInt();
     clear();
 
+    // Setup stats update timer (updates uptime and peer stats every second)
+    statsTimer = new QTimer(this);
+    connect(statsTimer, &QTimer::timeout, this, &RPCConsole::updateUptime);
+    connect(statsTimer, &QTimer::timeout, this, &RPCConsole::updatePeerStats);
+    statsTimer->start(1000);
+
     GUIUtil::handleCloseWindowShortcut(this);
 }
 
@@ -858,6 +866,48 @@ void RPCConsole::updateNetworkState()
     ui->numberOfConnections->setText(connections);
 }
 
+void RPCConsole::updateUptime()
+{
+    if (!clientModel)
+        return;
+
+    int64_t uptime = GetTime() - GetStartupTime();
+    ui->uptime->setText(GUIUtil::formatDurationStr(uptime));
+}
+
+void RPCConsole::updatePeerStats()
+{
+    if (!clientModel || !clientModel->getPeerTableModel())
+        return;
+
+    PeerTableModel* peerModel = clientModel->getPeerTableModel();
+    int rowCount = peerModel->rowCount(QModelIndex());
+
+    if (rowCount == 0) {
+        ui->avgPeerPing->setText(tr("N/A"));
+        return;
+    }
+
+    // Calculate average ping from all connected peers
+    double totalPing = 0;
+    int validPingCount = 0;
+
+    for (int i = 0; i < rowCount; ++i) {
+        const CNodeCombinedStats* stats = peerModel->getNodeStats(i);
+        if (stats && stats->nodeStats.m_ping_usec > 0) {
+            totalPing += stats->nodeStats.m_ping_usec;
+            validPingCount++;
+        }
+    }
+
+    if (validPingCount > 0) {
+        double avgPing = totalPing / validPingCount;
+        ui->avgPeerPing->setText(GUIUtil::formatPingTime(avgPing));
+    } else {
+        ui->avgPeerPing->setText(tr("N/A"));
+    }
+}
+
 void RPCConsole::setNumConnections(int count)
 {
     if (!clientModel)
@@ -997,6 +1047,30 @@ void RPCConsole::on_tabWidget_currentChanged(int index)
 void RPCConsole::on_openDebugLogfileButton_clicked()
 {
     GUIUtil::openDebugLogfile();
+}
+
+void RPCConsole::on_exportButton_clicked()
+{
+    QString filename = GUIUtil::getSaveFileName(this,
+        tr("Export Console History"), QString(),
+        tr("Text Files (*.txt);;All Files (*)"), nullptr);
+
+    if (filename.isEmpty())
+        return;
+
+    QFile file(filename);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::critical(this, tr("Error"),
+            tr("Could not open file for writing: %1").arg(file.errorString()));
+        return;
+    }
+
+    QTextStream out(&file);
+    out << ui->messagesWidget->toPlainText();
+    file.close();
+
+    QMessageBox::information(this, tr("Export Successful"),
+        tr("Console history exported to %1").arg(filename));
 }
 
 void RPCConsole::scrollToEnd()
