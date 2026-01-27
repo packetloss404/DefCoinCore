@@ -2,17 +2,18 @@
 
 *.exe
 *.pdb
-src/litecoin
-src/litecoind
-src/litecoin-cli
-src/litecoin-gui
-src/litecoin-node
-src/litecoin-tx
-src/litecoin-wallet
+src/defcoin
+src/defcoind
+src/defcoin-cli
+src/defcoin-gui
+src/defcoin-node
+src/defcoin-tx
+src/defcoin-wallet
 src/test/fuzz/*
 !src/test/fuzz/*.*
-src/test/test_litecoin
-src/qt/test/test_litecoin-qt
+src/test/test_defcoin
+src/qt/test/test_defcoin-qt
+libdefcoinconsensus.pc
 
 # autoreconf
 Makefile.in
@@ -137,7 +138,6 @@ test/.mypy_cache/
 
 /doc/doxygen/
 
-libbitcoinconsensus.pc
 contrib/devtools/split-debug.sh
 
 # Output from running db4 installation
