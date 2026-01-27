@@ -28,6 +28,9 @@
  */
 
 #include <crypto/scrypt.h>
+#ifdef __APPLE__
+#include <sys/endian.h>
+#endif
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -43,7 +46,7 @@
 #include <cpuid.h>
 #endif
 #endif
-#ifndef __FreeBSD__
+#if !defined(__FreeBSD__) && !defined(__APPLE__)
 static inline uint32_t be32dec(const void *pp)
 {
 	const uint8_t *p = (uint8_t const *)pp;

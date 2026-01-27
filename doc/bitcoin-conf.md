@@ -1,6 +1,6 @@
-# `bitcoin.conf` Configuration File
+# `defcoin.conf` Configuration File
 
-The configuration file is used by `bitcoind`, `bitcoin-qt` and `bitcoin-cli`.
+The configuration file is used by `defcoind`, `defcoin-qt` and `defcoin-cli`.
 
 All command-line options (except for `-?`, `-help`, `-version` and `-conf`) may be specified in a configuration file, and all configuration file options (except for `includeconf`) may also be specified on the command line. Command-line options override values set in the configuration file and configuration file options override values set in the GUI.
 
@@ -47,16 +47,16 @@ rpcport=4000
 
 ## Configuration File Path
 
-The configuration file is not automatically created; you can create it using your favorite text editor. By default, the configuration file name is `bitcoin.conf` and it is located in the Bitcoin data directory, but both the Bitcoin data directory and the configuration file path may be changed using the `-datadir` and `-conf` command-line options.
+The configuration file is not automatically created; you can create it using your favorite text editor. By default, the configuration file name is `defcoin.conf` and it is located in the Defcoin data directory, but both the Defcoin data directory and the configuration file path may be changed using the `-datadir` and `-conf` command-line options.
 
-The `includeconf=<file>` option in the `bitcoin.conf` file can be used to include additional configuration files.
+The `includeconf=<file>` option in the `defcoin.conf` file can be used to include additional configuration files.
 
 ### Default configuration file locations
 
 Operating System | Data Directory | Example Path
 -- | -- | --
-Windows | `%APPDATA%\Bitcoin\` | `C:\Users\username\AppData\Roaming\Bitcoin\bitcoin.conf`
-Linux | `$HOME/.bitcoin/` | `/home/username/.bitcoin/bitcoin.conf`
-macOS | `$HOME/Library/Application Support/Bitcoin/` | `/Users/username/Library/Application Support/Bitcoin/bitcoin.conf`
+Windows | `%APPDATA%\Defcoin\` | `C:\Users\username\AppData\Roaming\Defcoin\defcoin.conf`
+Linux | `$HOME/.defcoin/` | `/home/username/.defcoin/defcoin.conf`
+macOS | `$HOME/Library/Application Support/Defcoin/` | `/Users/username/Library/Application Support/Defcoin/defcoin.conf`
 
-You can find an example bitcoin.conf file in [share/examples/bitcoin.conf](../share/examples/bitcoin.conf).
+You can find an example defcoin.conf file in [share/examples/litecoin.conf](../share/examples/litecoin.conf).

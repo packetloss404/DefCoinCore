@@ -598,7 +598,7 @@ void SetupServerArgs(NodeContext& node)
 
 std::string LicenseInfo()
 {
-    const std::string URL_SOURCE_CODE = "<https://github.com/litecoin-project/litecoin>";
+    const std::string URL_SOURCE_CODE = "<https://github.com/defcoin-project/defcoin>";
 
     return CopyrightHolders(strprintf(_("Copyright (C) %i-%i").translated, 2011, COPYRIGHT_YEAR) + " ") + "\n" +
            "\n" +
@@ -1349,7 +1349,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     if (script_threads >= 1) {
         g_parallel_script_checks = true;
         for (int i = 0; i < script_threads; ++i) {
-            threadGroup.create_thread([i]() { return ThreadScriptCheck(i); });
+            threadGroup.create_thread([i]() { ThreadScriptCheck(i); });
         }
     }
 

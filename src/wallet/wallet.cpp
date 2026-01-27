@@ -951,15 +951,6 @@ CWalletTx* CWallet::AddToWallet(CTransactionRef tx, const boost::optional<MWEB::
             wtx.mweb_wtx_info = mweb_wtx_info;
             fUpdated = true;
         }
-        // If we have a witness-stripped version of this transaction, and we
-        // see a new version with a witness, then we must be upgrading a pre-segwit
-        // wallet.  Store the new version of the transaction with the witness,
-        // as the stripped-version must be invalid.
-        // TODO: Store all versions of the transaction, instead of just one.
-        if (wtxIn.tx->HasWitness() && !wtx.tx->HasWitness()) {
-            wtx.SetTx(wtxIn.tx);
-            fUpdated = true;
-        }
     }
 
     //// debug print

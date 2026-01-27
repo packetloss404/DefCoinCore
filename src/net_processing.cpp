@@ -535,7 +535,7 @@ static void PushNodeVersion(CNode& pnode, CConnman& connman, int64_t nTime)
 // Also used if a block was /not/ received and timed out or started with another peer
 // If from_peer is specified, only clear download state if it matches the peer we requested from.
 // This prevents a malicious peer from interfering with block relay by sending mutated blocks.
-static bool MarkBlockAsReceived(const uint256& hash, std::optional<NodeId> from_peer = std::nullopt) EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
+static bool MarkBlockAsReceived(const uint256& hash, Optional<NodeId> from_peer = nullopt) EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
     std::map<uint256, std::pair<NodeId, std::list<QueuedBlock>::iterator> >::iterator itInFlight = mapBlocksInFlight.find(hash);
     if (itInFlight != mapBlocksInFlight.end()) {
         // If from_peer is specified and doesn't match who we requested from, don't clear state
@@ -3449,7 +3449,8 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
                 mapBlockSource.erase(pblock->GetHash());
             }
             LOCK(cs_main); // hold cs_main for CBlockIndex::IsValid()
-            if (pindex->IsValid(BLOCK_VALID_TRANSACTIONS)) {
+            const CBlockIndex* pindex = LookupBlockIndex(pblock->GetHash());
+            if (pindex && pindex->IsValid(BLOCK_VALID_TRANSACTIONS)) {
                 // Clear download state for this block, which is in
                 // process from some other peer.  We do this after calling
                 // ProcessNewBlock so that a malleated cmpctblock announcement

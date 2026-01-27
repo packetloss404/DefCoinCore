@@ -38,7 +38,7 @@
 #include <QUrlQuery>
 
 const int BITCOIN_IPC_CONNECT_TIMEOUT = 1000; // milliseconds
-const QString BITCOIN_IPC_PREFIX("litecoin:");
+const QString BITCOIN_IPC_PREFIX("defcoin:");
 
 //
 // Create a name that is unique for:
@@ -47,7 +47,7 @@ const QString BITCOIN_IPC_PREFIX("litecoin:");
 //
 static QString ipcServerName()
 {
-    QString name("LitecoinQt");
+    QString name("DefcoinQt");
 
     // Append a simple hash of the datadir
     // Note that GetDataDir(true) returns a different path
@@ -220,9 +220,9 @@ void PaymentServer::handleURIOrFile(const QString& s)
         return;
     }
 
-    if (s.startsWith("litecoin://", Qt::CaseInsensitive))
+    if (s.startsWith("defcoin://", Qt::CaseInsensitive))
     {
-        Q_EMIT message(tr("URI handling"), tr("'litecoin://' is not a valid URI. Use 'litecoin:' instead."),
+        Q_EMIT message(tr("URI handling"), tr("'defcoin://' is not a valid URI. Use 'defcoin:' instead."),
             CClientUIInterface::MSG_ERROR);
     }
     else if (s.startsWith(BITCOIN_IPC_PREFIX, Qt::CaseInsensitive)) // bitcoin: URI
