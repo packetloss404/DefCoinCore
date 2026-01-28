@@ -1,8 +1,10 @@
 {
   "name": "bitcoin-core",
   "version-string": "1",
+  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01",
   "dependencies": [
     "berkeleydb",
+    "boost-dynamic-bitset",
     "boost-filesystem",
     "boost-multi-index",
     "boost-process",
@@ -11,6 +13,8 @@
     "boost-thread",
     "sqlite3",
     "double-conversion",
+    "fmt",
+    "openssl",
     {
       "name": "libevent",
       "features": ["thread"]

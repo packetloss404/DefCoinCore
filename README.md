@@ -198,6 +198,23 @@ After building, test sync against the existing Defcoin network:
 ./src/defcoind -printtoconsole
 ```
 
+----------------------------------
+## To Do
+
+Rename the Defcoin units from mDFC and μDFC in favor of a more flavorful name similar to [Litecoin](https://github.com/litecoin-project/litecoin/blob/master/src/qt/bitcoinunits.cpp#L43).
+This is stored in the file [```src/qt/bitcoinunits.cpp```](https://github.com/nah012/defcoin/blob/master/src/qt/bitcoinunits.cpp) on [lines 43 - 45](https://github.com/nah012/defcoin/blob/master/src/qt/bitcoinunits.cpp#L43-L45)
+```
+    case BTC: return QString("DFC");
+    case mBTC: return QString("mDFC");
+    case uBTC: return QString::fromUtf8("μDFC");
+```
+and on [lines 54 - 56](https://github.com/nah012/defcoin/blob/master/src/qt/bitcoinunits.cpp#L54-L56)
+```
+    case BTC: return QString("Defcoins");
+    case mBTC: return QString("Milli-Defcoins (1 / 1" THIN_SP_UTF8 "000)");
+    case uBTC: return QString("Micro-Defcoins (1 / 1" THIN_SP_UTF8 "000" THIN_SP_UTF8 "000)");
+```
+
 Credits
 -------
 

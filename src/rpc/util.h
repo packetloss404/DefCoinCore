@@ -20,6 +20,7 @@
 
 #include <string>
 #include <vector>
+#include <type_traits>
 
 #include <boost/variant.hpp>
 
@@ -145,15 +146,46 @@ struct RPCArg {
         OMITTED,
     };
     using Fallback = boost::variant<Optional, /* default value for optional args */ std::string>;
+    
+    // Helper to construct Fallback from Optional for MSVC compatibility
+    static Fallback MakeFallback(Optional opt) {
+        // Construct variant by explicitly creating it with the Optional value
+        // MSVC needs explicit construction
+        Fallback result;
+        *boost::get<Optional>(&result) = opt;
+        return result;
+    }
+    
     const std::string m_names; //!< The name of the arg (can be empty for inner args, can contain multiple aliases separated by | for named request arguments)
     const Type m_type;
     const bool m_hidden;
     const std::vector<RPCArg> m_inner; //!< Only used for arrays or dicts
-    const Fallback m_fallback;
+    Fallback m_fallback; // Made mutable to allow assignment in constructor body
     const std::string m_description;
     const std::string m_oneline_description; //!< Should be empty unless it is supposed to override the auto-generated summary line
     const std::vector<std::string> m_type_str; //!< Should be empty unless it is supposed to override the auto-generated type strings. Vector length is either 0 or 2, m_type_str.at(0) will override the type of the value in a key-value pair, m_type_str.at(1) will override the type in the argument description.
 
+    // Constructor accepting Optional directly for MSVC compatibility with initializer lists
+    RPCArg(
+        const std::string name,
+        const Type type,
+        Optional fallback_opt,
+        const std::string description,
+        const std::string oneline_description = "",
+        const std::vector<std::string> type_str = {},
+        const bool hidden = false)
+        : m_names{std::move(name)},
+          m_type{std::move(type)},
+          m_hidden{hidden},
+          m_fallback{},
+          m_description{std::move(description)},
+          m_oneline_description{std::move(oneline_description)},
+          m_type_str{std::move(type_str)}
+    {
+        m_fallback = MakeFallback(fallback_opt);
+        CHECK_NONFATAL(type != Type::ARR && type != Type::OBJ);
+    }
+    
     RPCArg(
         const std::string name,
         const Type type,
@@ -172,7 +204,29 @@ struct RPCArg {
     {
         CHECK_NONFATAL(type != Type::ARR && type != Type::OBJ);
     }
-
+    
+    // Constructor accepting Optional directly for MSVC compatibility with initializer lists
+    RPCArg(
+        const std::string name,
+        const Type type,
+        Optional fallback_opt,
+        const std::string description,
+        const std::vector<RPCArg> inner,
+        const std::string oneline_description = "",
+        const std::vector<std::string> type_str = {})
+        : m_names{std::move(name)},
+          m_type{std::move(type)},
+          m_hidden{false},
+          m_inner{std::move(inner)},
+          m_fallback{},
+          m_description{std::move(description)},
+          m_oneline_description{std::move(oneline_description)},
+          m_type_str{std::move(type_str)}
+    {
+        m_fallback = MakeFallback(fallback_opt);
+        CHECK_NONFATAL(type == Type::ARR || type == Type::OBJ);
+    }
+    
     RPCArg(
         const std::string name,
         const Type type,

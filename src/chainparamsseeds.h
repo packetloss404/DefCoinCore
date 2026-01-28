@@ -19,5 +19,6 @@ static SeedSpec6 pnSeed6_main[] = {
 // DEFCOIN testnet seeds - port 31337
 static SeedSpec6 pnSeed6_test[] = {
     // No testnet seeds currently
+    {{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0x00,0x00,0x00,0x00}, 0}, // placeholder to avoid zero-size array
 };
 #endif // BITCOIN_CHAINPARAMSSEEDS_H

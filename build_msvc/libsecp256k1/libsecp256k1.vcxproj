@@ -8,12 +8,12 @@
     <ConfigurationType>StaticLibrary</ConfigurationType>
   </PropertyGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\src\secp256k1\src\secp256k1.c" />
+    <ClCompile Include="..\..\src\secp256k1-zkp\src\secp256k1.c" />
   </ItemGroup>
     <ItemDefinitionGroup>
     <ClCompile>
       <PreprocessorDefinitions>ENABLE_MODULE_ECDH;ENABLE_MODULE_RECOVERY;ENABLE_MODULE_EXTRAKEYS;ENABLE_MODULE_SCHNORRSIG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-       <AdditionalIncludeDirectories>..\..\src\secp256k1;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+       <AdditionalIncludeDirectories>..\..\src\secp256k1-zkp;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
      </ClCompile>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />

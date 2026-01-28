@@ -1189,6 +1189,9 @@ void runCommand(const std::string& strCommand)
 #endif
 
 #ifdef HAVE_BOOST_PROCESS
+// Boost.Process v2 API is significantly different from v1
+// For now, disable this feature on Windows until proper v2 implementation
+#if !defined(_WIN32) || defined(BOOST_PROCESS_V1_COMPAT)
 UniValue RunCommandParseJSON(const std::string& str_command, const std::string& str_std_in)
 {
     namespace bp = boost::process;
@@ -1223,6 +1226,13 @@ UniValue RunCommandParseJSON(const std::string& str_command, const std::string& 
 
     return result_json;
 }
+#else
+// Boost.Process v2 not yet implemented
+UniValue RunCommandParseJSON(const std::string& str_command, const std::string& str_std_in)
+{
+    throw std::runtime_error("RunCommandParseJSON is not available on Windows with Boost.Process v2");
+}
+#endif
 #endif // HAVE_BOOST_PROCESS
 
 void SetupEnvironment()
