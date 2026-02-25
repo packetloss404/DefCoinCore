@@ -237,13 +237,10 @@ public:
         // DEFCOIN testnet genesis - uses same timestamp message as mainnet
         // Time: March 5, 2014 (shortly after mainnet)
         // Nonce mined to satisfy 0x1e0ffff0 difficulty
-        genesis = CreateGenesisBlock(1394003000, 385878779, 0x1e0ffff0, 1, 50 * COIN);
+        genesis = CreateGenesisBlock(1394003000, 707631, 0x1e0ffff0, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
-        // Note: These hashes will need to be updated after mining a valid testnet genesis
-        // For now, compute dynamically - remove assertions for initial testing
-        // TODO: Mine proper testnet genesis and add assertions back
-        // assert(consensus.hashGenesisBlock == uint256S("0x..."));
-        // assert(genesis.hashMerkleRoot == uint256S("0x7294da28c1b8eeba868388b14e2205874fb512f0ca31c2f583002557175f2c9c"));
+        assert(consensus.hashGenesisBlock == uint256S("0x3b714281e102f963bc15948692d18f5e2792bfe5e81d333d25d7f9c563e07f7f"));
+        assert(genesis.hashMerkleRoot == uint256S("0x7294da28c1b8eeba868388b14e2205874fb512f0ca31c2f583002557175f2c9c"));
 
         vFixedSeeds.clear();
         vSeeds.clear();

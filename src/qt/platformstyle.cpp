@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/platformstyle.h>
+#include <qt/theme.h>
 
 #include <QApplication>
 #include <QColor>

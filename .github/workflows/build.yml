@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-windows:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,6 +27,16 @@ jobs:
           sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
           sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
 
+      - name: Cache depends
+        uses: actions/cache@v4
+        with:
+          path: |
+            depends/built/x86_64-w64-mingw32
+            depends/sources
+          key: depends-mingw32-${{ hashFiles('depends/packages/*.mk') }}
+          restore-keys: |
+            depends-mingw32-
+
       - name: Build depends
         run: |
           cd depends
@@ -35,7 +45,10 @@ jobs:
       - name: Configure
         run: |
           ./autogen.sh
-          CONFIG_SITE=$PWD/depends/x86_64-w64-mingw32/share/config.site ./configure --prefix=/
+          CONFIG_SITE=$PWD/depends/x86_64-w64-mingw32/share/config.site ./configure \
+            --prefix=/ \
+            --disable-bench \
+            --disable-gui-tests
 
       - name: Build
         run: make -j$(nproc)
@@ -43,11 +56,12 @@ jobs:
       - name: Package binaries
         run: |
           mkdir -p release
-          cp src/defcoind.exe release/ || true
-          cp src/defcoin-cli.exe release/ || true
-          cp src/defcoin-tx.exe release/ || true
-          cp src/defcoin-wallet.exe release/ || true
-          cp src/qt/defcoin-qt.exe release/ || true
+          cp src/defcoind.exe release/
+          cp src/defcoin-cli.exe release/
+          cp src/defcoin-tx.exe release/
+          cp src/defcoin-wallet.exe release/
+          cp src/qt/defcoin-qt.exe release/
+          x86_64-w64-mingw32-strip release/*.exe
           cp COPYING release/
           cp README.md release/
 
@@ -59,7 +73,7 @@ jobs:
           retention-days: 30
 
   build-linux:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,7 +85,7 @@ jobs:
             build-essential libtool autotools-dev automake pkg-config \
             bsdmainutils curl git \
             libssl-dev libevent-dev libboost-all-dev \
-            libdb-dev libdb++-dev \
+            libdb-dev libdb++-dev libsqlite3-dev \
             libminiupnpc-dev libzmq3-dev libfmt-dev \
             libqt5gui5 libqt5core5a libqt5dbus5 qttools5-dev qttools5-dev-tools \
             libqrencode-dev
@@ -87,11 +101,12 @@ jobs:
       - name: Package binaries
         run: |
           mkdir -p release
-          cp src/defcoind release/ || true
-          cp src/defcoin-cli release/ || true
-          cp src/defcoin-tx release/ || true
-          cp src/defcoin-wallet release/ || true
-          cp src/qt/defcoin-qt release/ || true
+          cp src/defcoind release/
+          cp src/defcoin-cli release/
+          cp src/defcoin-tx release/
+          cp src/defcoin-wallet release/
+          cp src/qt/defcoin-qt release/
+          strip release/defcoind release/defcoin-cli release/defcoin-tx release/defcoin-wallet release/defcoin-qt
           cp COPYING release/
           cp README.md release/
 
@@ -103,10 +118,20 @@ jobs:
           retention-days: 30
 
   build-macos:
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Cache Homebrew
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/Homebrew
+            /opt/homebrew/Cellar
+          key: brew-macos14-${{ hashFiles('.github/workflows/build.yml') }}
+          restore-keys: |
+            brew-macos14-
 
       - name: Install dependencies
         run: |
@@ -128,17 +153,18 @@ jobs:
       - name: Package binaries
         run: |
           mkdir -p release
-          cp src/defcoind release/ || true
-          cp src/defcoin-cli release/ || true
-          cp src/defcoin-tx release/ || true
-          cp src/defcoin-wallet release/ || true
-          cp src/qt/defcoin-qt release/ || true
+          cp src/defcoind release/
+          cp src/defcoin-cli release/
+          cp src/defcoin-tx release/
+          cp src/defcoin-wallet release/
+          cp src/qt/defcoin-qt release/
+          strip release/defcoind release/defcoin-cli release/defcoin-tx release/defcoin-wallet release/defcoin-qt
           cp COPYING release/
           cp README.md release/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: defcoin-macos-x64
+          name: defcoin-macos-arm64
           path: release/
           retention-days: 30

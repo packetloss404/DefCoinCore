@@ -13,6 +13,7 @@
 
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
+#include <qt/theme.h>
 #include <qt/optionsmodel.h>
 
 #include <interfaces/node.h>

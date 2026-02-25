@@ -17,6 +17,7 @@
 #include <qt/optionsmodel.h>
 #include <qt/platformstyle.h>
 #include <qt/rpcconsole.h>
+#include <qt/theme.h>
 #include <qt/utilitydialog.h>
 
 #ifdef ENABLE_WALLET

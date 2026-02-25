@@ -402,7 +402,6 @@ bool SendCoinsDialog::PrepareSendText(QString& question_string, QString& informa
     } else {
         question_string = question_string.arg("<br /><br />" + formatted.at(0));
     }
-    */
 
     return true;
 }

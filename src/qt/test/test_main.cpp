@@ -100,7 +100,5 @@ int main(int argc, char* argv[])
     }
 #endif
 
-    fs::remove_all(pathTemp);
-
     return fInvalid;
 }

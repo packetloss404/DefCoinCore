@@ -12,6 +12,7 @@
 #include <qt/bantablemodel.h>
 #include <qt/clientmodel.h>
 #include <qt/platformstyle.h>
+#include <qt/theme.h>
 #include <qt/walletmodel.h>
 #include <chainparams.h>
 #include <interfaces/node.h>
