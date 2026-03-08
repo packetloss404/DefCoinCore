@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v2.0.0)'
+        required: false
+
+jobs:
+  build-windows:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libtool autotools-dev automake pkg-config \
+            bsdmainutils curl git nsis \
+            g++-mingw-w64-x86-64 mingw-w64-x86-64-dev
+
+      - name: Set MinGW to POSIX threading
+        run: |
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+
+      - name: Build depends
+        run: |
+          cd depends
+          make HOST=x86_64-w64-mingw32 -j$(nproc)
+
+      - name: Configure
+        run: |
+          ./autogen.sh
+          CONFIG_SITE=$PWD/depends/x86_64-w64-mingw32/share/config.site ./configure \
+            --prefix=/ \
+            --disable-bench \
+            --disable-gui-tests
+
+      - name: Build
+        run: make -j$(nproc)
+
+      - name: Package
+        run: |
+          mkdir -p release
+          cp src/defcoind.exe release/
+          cp src/defcoin-cli.exe release/
+          cp src/defcoin-tx.exe release/
+          cp src/defcoin-wallet.exe release/
+          cp src/qt/defcoin-qt.exe release/
+          x86_64-w64-mingw32-strip release/*.exe
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libtool autotools-dev automake pkg-config \
+            bsdmainutils curl git \
+            libssl-dev libevent-dev libboost-all-dev \
+            libdb-dev libdb++-dev libsqlite3-dev \
+            libminiupnpc-dev libzmq3-dev libfmt-dev \
+            libqt5gui5 libqt5core5a libqt5dbus5 qttools5-dev qttools5-dev-tools \
+            libqrencode-dev
+
+      - name: Configure
+        run: |
+          ./autogen.sh
+          ./configure --with-incompatible-bdb
+
+      - name: Build
+        run: make -j$(nproc)
+
+      - name: Package
+        run: |
+          mkdir -p release
+          tar -czvf defcoin-${{ github.ref_name }}-linux-x64.tar.gz \
+            src/defcoind src/defcoin-cli src/defcoin-tx src/defcoin-wallet src/qt/defcoin-qt
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install automake libtool pkg-config miniupnpc openssl@3 libevent boost berkeley-db@4 qt@5 qrencode
+
+      - name: Configure
+        run: |
+          ./autogen.sh
+          ./configure --with-gui=qt5 \
+            --with-boost=$(brew --prefix boost) \
+            --with-miniupnpc=$(brew --prefix miniupnpc) \
+            PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix qt@5)/lib/pkgconfig" \
+            LDFLAGS="-L$(brew --prefix openssl@3)/lib -L$(brew --prefix berkeley-db@4)/lib" \
+            CPPFLAGS="-I$(brew --prefix openssl@3)/include -I$(brew --prefix berkeley-db@4)/include"
+
+      - name: Build
+        run: make -j$(sysctl -n hw.ncpu)
+
+      - name: Package
+        run: |
+          mkdir -p release
+          tar -czvf defcoin-${{ github.ref_name }}-macos-arm64.tar.gz \
+            src/defcoind src/defcoin-cli src/defcoin-tx src/defcoin-wallet src/qt/defcoin-qt
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
