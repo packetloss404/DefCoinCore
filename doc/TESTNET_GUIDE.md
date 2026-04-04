@@ -145,7 +145,7 @@ Note: Testnet uses real Scrypt PoW, so mining takes actual time unlike regtest.
 | Service | Port |
 |---------|------|
 | P2P | 31337 |
-| RPC | 31335 |
+| RPC | 19332 |
 
 ### Testnet Data Location
 
@@ -155,9 +155,10 @@ Note: Testnet uses real Scrypt PoW, so mining takes actual time unlike regtest.
 
 ---
 
-## Option 3: Signet (Not Configured)
+## Option 3: Signet
 
-Signet is a centrally-signed testnet. Not currently configured for Defcoin.
+`-signet` is not currently supported in this branch. Use `-testnet` for shared-network testing
+or `-regtest` for fully local testing.
 
 ---
 
@@ -260,7 +261,7 @@ Consider creating Docker containers for easy multi-node testing.
 | Mining difficulty | None (instant) | Real Scrypt | Real Scrypt |
 | Coins have value | No | No | Yes |
 | Need peers | No | Yes | Yes |
-| Block time | Instant | ~2 min | ~2 min |
+| Block time | Instant | ~2.5 min | ~2 min |
 | Port | 19444 | 31337 | 1337 |
 | Data dir | regtest/ | testnet4/ | .defcoin/ |
 | Use case | Development | Integration testing | Production |

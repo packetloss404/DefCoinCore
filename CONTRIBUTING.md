@@ -26,14 +26,15 @@ process than opening pull requests. Please refer to the [peer review](#peer-revi
 section below.
 
 Before you start contributing, familiarize yourself with the Defcoin Core build
-system and tests. Refer to the documentation in the repository on how to build
-Defcoin Core and how to run the unit tests, functional tests, and fuzz tests.
+system and tests. Start with [INSTALL.md](INSTALL.md), the [documentation
+index](doc/README.md), [test/README.md](test/README.md), and
+[doc/fuzzing.md](doc/fuzzing.md).
 
 There are many open issues of varying difficulty waiting to be fixed.
 If you're looking for somewhere to start contributing, check out the
-[good first issue](https://github.com/packetloss404/defcoin/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22)
+[good first issue](https://github.com/packetloss404/DefCoinCore/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22)
 list or changes that are
-[up for grabs](https://github.com/packetloss404/defcoin/issues?utf8=%E2%9C%93&q=label%3A%22Up+for+grabs%22).
+[up for grabs](https://github.com/packetloss404/DefCoinCore/issues?utf8=%E2%9C%93&q=label%3A%22Up+for+grabs%22).
 Some of them might no longer be applicable. So if you are interested, but
 unsure, you might want to leave a comment on the issue first.
 
@@ -54,7 +55,7 @@ Communication Channels
 ----------------------
 
 Discussion about codebase improvements happens in GitHub issues and pull
-requests at https://github.com/packetloss404/defcoin.
+requests at https://github.com/packetloss404/DefCoinCore.
 
 Contributor Workflow
 --------------------
@@ -65,7 +66,7 @@ facilitates social contribution, easy testing and peer review.
 
 To contribute a patch, the workflow is as follows:
 
-  1. Fork repository ([only for the first time](https://help.github.com/en/articles/fork-a-repo))
+  1. Fork repository ([only for the first time](https://docs.github.com/en/get-started/quickstart/fork-a-repo))
   1. Create topic branch
   1. Commit patches
 
@@ -146,7 +147,7 @@ for more information on helping with translations.
 ### Work in Progress Changes and Requests for Comments
 
 If a pull request is not to be considered for merging (yet), please
-prefix the title with [WIP] or use [Tasks Lists](https://help.github.com/articles/basic-writing-and-formatting-syntax/#task-lists)
+prefix the title with [WIP] or use [Tasks Lists](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/about-task-lists)
 in the body of the pull request to indicate tasks are pending.
 
 ### Address Feedback
@@ -347,7 +348,7 @@ about:
   - It may be because your code is too complex for all but a few people, and those people
     may not have realized your pull request even exists. A great way to find people who
     are qualified and care about the code you are touching is the
-    [Git Blame feature](https://help.github.com/articles/tracing-changes-in-a-file/). Simply
+    [Git blame](https://docs.github.com/en/repositories/working-with-files/using-files/viewing-a-file#viewing-line-by-line-revision-history-for-a-file). Simply
     look up who last modified the code you are changing and see if you can find
     them and give them a nudge. Don't be incessant about the nudging, though.
   - Finally, if all else fails, ask for someone to give your pull request
@@ -361,7 +362,7 @@ about:
 Backporting
 -----------
 
-Security and bug fixes can be backported from `master` to release
+Security and bug fixes can be backported from `main` to release
 branches.
 If the backport is non-trivial, it may be appropriate to open an
 additional PR to backport the change, but only after the original PR

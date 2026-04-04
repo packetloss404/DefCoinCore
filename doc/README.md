@@ -3,9 +3,11 @@ Defcoin Core
 
 Setup
 ---------------------
-Defcoin Core is the original Defcoin client and it builds the backbone of the network. It downloads and, by default, stores the entire history of Defcoin transactions, which requires a few gigabytes of disk space. Depending on the speed of your computer and network connection, the synchronization process can take anywhere from a few hours to a day or more.
+Defcoin Core is the reference full node and wallet for the Defcoin network. It downloads and, by
+default, stores the full blockchain, so the initial sync can take a while depending on your system
+and network connection.
 
-To download Defcoin Core, visit [defcoin.io](https://defcoin.io/).
+To download Defcoin Core, visit [defcoin.io](https://www.defcoin.io/).
 
 Running
 ---------------------
@@ -28,8 +30,9 @@ Drag Defcoin Core to your applications folder, and then run Defcoin Core.
 
 ### Need Help?
 
-* See the documentation in this repository for help and more information.
-* Open an issue at https://github.com/packetloss404/defcoin/issues
+* Start with the top-level [install guide](../INSTALL.md).
+* See the [root README](../README.md) for current network and testing notes.
+* Open an issue at https://github.com/packetloss404/DefCoinCore/issues
 
 Building
 ---------------------
@@ -46,12 +49,13 @@ The following are developer notes on how to build Defcoin Core on your native pl
 
 Development
 ---------------------
-The Defcoin repo's [root README](/README.md) contains relevant information on the development process and automated testing.
+The Defcoin repo's [root README](/README.md) contains the current project overview, testing entry
+points, and contributor starting points.
 
 - [Developer Notes](developer-notes.md)
 - [Productivity Notes](productivity.md)
-- [Release Notes](release-notes.md)
-- [Release Process](release-process.md)
+- [Current Defcoin release overview](../README.md)
+- [Historical Litecoin release notes archive](litecoin-release-notes/)
 - [Translation Process](translation_process.md)
 - [Translation Strings Policy](translation_strings_policy.md)
 - [JSON-RPC Interface](JSON-RPC-interface.md)
@@ -62,13 +66,14 @@ The Defcoin repo's [root README](/README.md) contains relevant information on th
 - [Benchmarking](benchmarking.md)
 
 ### Resources
-* Discuss on GitHub: https://github.com/packetloss404/defcoin
+* Discuss on GitHub: https://github.com/packetloss404/DefCoinCore
 
 ### Miscellaneous
 - [Assets Attribution](assets-attribution.md)
 - [defcoin.conf Configuration File](bitcoin-conf.md)
 - [Files](files.md)
 - [Fuzz-testing](fuzzing.md)
+- [Codebase recommendations](../recommendations.md)
 - [Reduce Memory](reduce-memory.md)
 - [Reduce Traffic](reduce-traffic.md)
 - [Tor Support](tor.md)

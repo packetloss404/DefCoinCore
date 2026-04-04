@@ -30,6 +30,9 @@ Network specific options can be:
 - placed into sections with headers `[main]` (not `[mainnet]`), `[test]` (not `[testnet]`), `[signet]` or `[regtest]`;
 - prefixed with a chain name; e.g., `regtest.maxmempool=100`.
 
+In this repository, the parser still understands signet-specific configuration sections, but
+`-signet` is not currently documented as a supported runtime network.
+
 Network specific options take precedence over non-network specific options.
 If multiple values for the same option are found with the same precedence, the
 first one is generally chosen.
@@ -59,4 +62,5 @@ Windows | `%APPDATA%\Defcoin\` | `C:\Users\username\AppData\Roaming\Defcoin\defc
 Linux | `$HOME/.defcoin/` | `/home/username/.defcoin/defcoin.conf`
 macOS | `$HOME/Library/Application Support/Defcoin/` | `/Users/username/Library/Application Support/Defcoin/defcoin.conf`
 
-You can find an example defcoin.conf file in [share/examples/litecoin.conf](../share/examples/litecoin.conf).
+You can find an example `defcoin.conf` template in [share/examples/litecoin.conf](../share/examples/litecoin.conf).
+The filename is inherited from upstream, but the contents are Defcoin-specific.

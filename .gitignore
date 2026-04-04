@@ -62,18 +62,27 @@ src/qt/bitcoin-qt.includes
 .dirstamp
 .libs
 .vscode
+.vs/
 .*.swp
 *.*~*
 *.bak
 *.rej
 *.orig
 *.pyc
+**/__pycache__/
+.pytest_cache/
+.coverage
+.coverage.*
+.cache/
 *.o
 *.o-*
 *.a
 *.pb.cc
 *.pb.h
 *.dat
+*.pid
+*.seed
+*.walletbackup
 
 *.log
 *.trs
@@ -101,6 +110,12 @@ background.tiff*
 
 # Qt Creator
 Makefile.am.user
+
+# Local environments / secrets
+.env
+.env.*
+.venv/
+venv/
 
 # Unit-tests
 Makefile.test
@@ -174,9 +189,15 @@ build_msvc/*.suo
 build_msvc/*.user
 build_msvc/*.userosscache
 build_msvc/*.sln.docstates
+build_msvc/**/*.tlog/
+build_msvc/**/*.lastbuildstate
+build_msvc/**/*.recipe
 build_msvc/[Bb]in/
 build_msvc/[Dd]ebug/
 build_msvc/[Rr]elease/
 build_msvc/[Rr]eleases/
 build_msvc/[Oo]bj/
 build_msvc/[Ll]og/
+*.VC.db
+*.opendb
+ipch/
