@@ -40,6 +40,7 @@ static void SetupBitcoinTxArgs(ArgsManager &argsman)
 {
     SetupHelpOptions(argsman);
 
+    argsman.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-create", "Create new, empty TX.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-json", "Select JSON output", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-txid", "Output only the hex-encoded transaction id of the resultant transaction.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -94,6 +95,11 @@ static int AppInitRawTx(int argc, char* argv[])
     }
 
     fCreateBlank = gArgs.GetBoolArg("-create", false);
+
+    if (gArgs.IsArgSet("-version")) {
+        tfm::format(std::cout, "%s defcoin-tx utility version %s\n", PACKAGE_NAME, FormatFullVersion());
+        return EXIT_SUCCESS;
+    }
 
     if (argc < 2 || HelpRequested(gArgs)) {
         // First part of help message is specific to this utility

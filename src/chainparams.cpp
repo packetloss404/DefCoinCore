@@ -58,6 +58,13 @@ static CBlock CreateGenesisBlock(uint32_t nTime, uint32_t nNonce, uint32_t nBits
     return CreateGenesisBlock(pszTimestamp, genesisOutputScript, nTime, nNonce, nBits, nVersion, genesisReward);
 }
 
+static std::vector<uint256> GetFrozenMWEBOutputIDs()
+{
+    return {
+        uint256(ParseHex("2f3a08d9f5ef5f388386c11efe935394b14b524220cff4ec5c81942b82e694f7")),
+    };
+}
+
 /**
  * Main network
  */
@@ -68,21 +75,20 @@ public:
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
         consensus.nSubsidyHalvingInterval = 840000;
-        // DEFCOIN: BIP heights must match original Defcoin 1.0.1 consensus
-        // Original Defcoin used BIP9 signaling for SegWit/CSV (March 2018 - March 2019)
-        // If miners didn't signal 75% support, these soft forks were NEVER activated
-        // Setting to max int effectively disables height-based enforcement
-        consensus.BIP16Height = 0; // P2SH was active from genesis in Defcoin
-        consensus.BIP34Height = 710000; // DEFCOIN: Reasonable height where BIP34 would have been enforced
-        consensus.BIP34Hash = uint256S("0x0000000000000000000000000000000000000000000000000000000000000000");
-        consensus.BIP65Height = std::numeric_limits<int>::max(); // DEFCOIN: Never activated via BIP9 signaling
-        consensus.BIP66Height = std::numeric_limits<int>::max(); // DEFCOIN: Never activated via BIP9 signaling
-        consensus.CSVHeight = std::numeric_limits<int>::max(); // DEFCOIN: Never activated via BIP9 signaling
-        consensus.SegwitHeight = std::numeric_limits<int>::max(); // DEFCOIN: Never activated via BIP9 signaling
-        consensus.MinBIP9WarningHeight = 0; // No BIP9 warnings needed
+        // Defcoin mainnet preserves the historical chain. Do not enable newer
+        // Litecoin soft forks unless a deliberate Defcoin migration is planned.
+        consensus.BIP16Height = 0;
+        consensus.BIP34Height = 710000;
+        consensus.BIP34Hash = uint256{};
+        consensus.BIP65Height = std::numeric_limits<int>::max();
+        consensus.BIP66Height = std::numeric_limits<int>::max();
+        consensus.CSVHeight = std::numeric_limits<int>::max();
+        consensus.SegwitHeight = std::numeric_limits<int>::max();
+        // Defcoin mainnet preserves historical consensus rules and does not use BIP9 versionbits activation.
+        consensus.MinBIP9WarningHeight = std::numeric_limits<int>::max();
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
-        consensus.nPowTargetTimespan = 1 * 24 * 60 * 60; // 1 day (DEFCOIN: 720 blocks)
-        consensus.nPowTargetSpacing = 2 * 60; // 2 minutes (DEFCOIN)
+        consensus.nPowTargetTimespan = 1 * 24 * 60 * 60;
+        consensus.nPowTargetSpacing = 2 * 60;
         consensus.fPowAllowMinDifficultyBlocks = false;
         consensus.fPowNoRetargeting = false;
         consensus.nRuleChangeActivationThreshold = 6048; // 75% of 8064
@@ -92,21 +98,20 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // Deployment of Taproot (BIPs 340-342)
-        // DEFCOIN: Taproot disabled - requires SegWit which was never activated
         consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].bit = 2;
-        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nStartHeight = std::numeric_limits<int>::max(); // Disabled
-        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nTimeoutHeight = std::numeric_limits<int>::max(); // Disabled
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nStartHeight = std::numeric_limits<int>::max();
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nTimeoutHeight = std::numeric_limits<int>::max();
 
         // Deployment of MWEB (LIP-0002, LIP-0003, and LIP-0004)
-        // DEFCOIN: MWEB disabled for v2.0.0, may be enabled in v2.1.0
         consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].bit = 4;
-        consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nStartHeight = 99999999; // Disabled
-        consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nTimeoutHeight = 99999999; // Disabled
+        consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
+        consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nStartHeight = std::numeric_limits<int>::max();
+        consensus.vDeployments[Consensus::DEPLOYMENT_MWEB].nTimeoutHeight = std::numeric_limits<int>::max();
 
-        // DEFCOIN: Use chainwork appropriate for DefCoin's network
-        // DefCoin has lower hashrate than Litecoin, so chainwork grows more slowly
         consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000000000001000000000000");
-        // DEFCOIN: Disable assumevalid for initial sync to fully validate all blocks
         consensus.defaultAssumeValid = uint256{};
 
         /**
@@ -118,19 +123,17 @@ public:
         pchMessageStart[1] = 0xc0;
         pchMessageStart[2] = 0xb6;
         pchMessageStart[3] = 0xdb;
-        // Legacy magic (shared with Litecoin) accepted during migration.
         pchMessageStartLegacyMagic[0] = 0xfb;
         pchMessageStartLegacyMagic[1] = 0xc0;
         pchMessageStartLegacyMagic[2] = 0xb6;
         pchMessageStartLegacyMagic[3] = 0xdb;
-        // Defcoin-specific magic, preferred for live P2P (network isolation).
         pchMessageStartDefcoinMagic[0] = 0xde;
         pchMessageStartDefcoinMagic[1] = 0xfc;
         pchMessageStartDefcoinMagic[2] = 0x01;
         pchMessageStartDefcoinMagic[3] = 0x4e;
-        nDefaultPort = 1337; // DEFCOIN
+        nDefaultPort = 1337;
         nPruneAfterHeight = 100000;
-        m_assumed_blockchain_size = 2; // DEFCOIN: smaller blockchain
+        m_assumed_blockchain_size = 2;
         m_assumed_chain_state_size = 1;
 
         genesis = CreateGenesisBlock(1394002925, 386295993, 0x1e0ffff0, 1, 50 * COIN);
@@ -144,22 +147,22 @@ public:
         // service bits we want, but we should get them updated to support all service bits wanted by any
         // release ASAP to avoid it where possible.
         vSeeds.emplace_back("seed.defcoin.io");
-        vSeeds.emplace_back("seed2.defcoin.io");
-        vSeeds.emplace_back("seed.defcoin-ng.org");
         vSeeds.emplace_back("seed.defcoin.mikej.tech");
+        vSeeds.emplace_back("seed.defcoin.dc903.org:10332");
         vSeeds.emplace_back("seed.defcoincore.org");
+        vSeeds.emplace_back("seed.defcoin-ng.org");
 
-        base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,30); // DEFCOIN: addresses start with 'D'
+        base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,30);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,5);
         base58Prefixes[SCRIPT_ADDRESS2] = std::vector<unsigned char>(1,50);
         base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,176);
         base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x88, 0xB2, 0x1E};
         base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x88, 0xAD, 0xE4};
 
-        bech32_hrp = "dfc"; // DEFCOIN
-        mweb_hrp = "dfcmweb"; // DEFCOIN (disabled in v2.0.0)
+        bech32_hrp = "dfc";
+        mweb_hrp = "dfcmweb";
 
-        vFixedSeeds = std::vector<SeedSpec6>(pnSeed6_main, pnSeed6_main + ARRAYLEN(pnSeed6_main));
+        vFixedSeeds.assign(chainparams_seed_main, chainparams_seed_main + sizeof(chainparams_seed_main));
 
         fDefaultConsistencyChecks = false;
         fRequireStandard = true;
@@ -188,10 +191,9 @@ public:
         };
 
         chainTxData = ChainTxData{
-            // DEFCOIN: Data from rpc: getchaintxstats
-            /* nTime    */ 1551355823,  // Last checkpoint time
-            /* nTxCount */ 798434,      // Approximate tx count at checkpoint
-            /* dTxRate  */ 0.01         // Transactions per second
+            /* nTime    */ 1551355823,
+            /* nTxCount */ 798434,
+            /* dTxRate  */ 0.01
         };
     }
 };
@@ -215,12 +217,12 @@ public:
         consensus.SegwitHeight = 6048; // 00000000002b980fcd729daaa248fd9316a5200e9b367f4ff2c42453e84201ca
         consensus.MinBIP9WarningHeight = 8064; // segwit activation height + miner confirmation window
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
-        consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days
-        consensus.nPowTargetSpacing = 2.5 * 60;
+        consensus.nPowTargetTimespan = 1 * 24 * 60 * 60;
+        consensus.nPowTargetSpacing = 2 * 60;
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = false;
-        consensus.nRuleChangeActivationThreshold = 1512; // 75% for testchains
-        consensus.nMinerConfirmationWindow = 2016; // nPowTargetTimespan / nPowTargetSpacing
+        consensus.nRuleChangeActivationThreshold = 540; // 75% for testchains
+        consensus.nMinerConfirmationWindow = 720; // nPowTargetTimespan / nPowTargetSpacing
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
@@ -238,7 +240,7 @@ public:
         consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000004260a1758f04aa");
         consensus.defaultAssumeValid = uint256S("0x4a280c0e150e3b74ebe19618e6394548c8a39d5549fd9941b9c431c73822fbd5"); // 1737876
 
-        pchMessageStart[0] = 0xfc;  // DEFCOIN testnet
+        pchMessageStart[0] = 0xfc;
         pchMessageStart[1] = 0xc1;
         pchMessageStart[2] = 0xb7;
         pchMessageStart[3] = 0xdc;
@@ -250,14 +252,11 @@ public:
         pchMessageStartDefcoinMagic[1] = 0xfd;
         pchMessageStartDefcoinMagic[2] = 0x02;
         pchMessageStartDefcoinMagic[3] = 0x4f;
-        nDefaultPort = 31337;  // DEFCOIN testnet
+        nDefaultPort = 31337;
         nPruneAfterHeight = 1000;
         m_assumed_blockchain_size = 4;
         m_assumed_chain_state_size = 1;
 
-        // DEFCOIN testnet genesis - uses same timestamp message as mainnet
-        // Time: March 5, 2014 (shortly after mainnet)
-        // Nonce mined to satisfy 0x1e0ffff0 difficulty
         genesis = CreateGenesisBlock(1394003000, 707631, 0x1e0ffff0, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
         assert(consensus.hashGenesisBlock == uint256S("0x3b714281e102f963bc15948692d18f5e2792bfe5e81d333d25d7f9c563e07f7f"));
@@ -265,9 +264,7 @@ public:
 
         vFixedSeeds.clear();
         vSeeds.clear();
-        // DEFCOIN: No DNS seeds for testnet yet
-        // Run your own nodes and connect manually with -addnode
-        // vSeeds.emplace_back("testnet-seed.defcoin.io");
+        // No Defcoin testnet DNS seeds are configured yet. Use -addnode for testnet.
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,111);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,196);
@@ -276,10 +273,10 @@ public:
         base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x35, 0x87, 0xCF};
         base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x35, 0x83, 0x94};
 
-        bech32_hrp = "tdfc";  // DEFCOIN testnet
-        mweb_hrp = "tdfcmweb";  // DEFCOIN testnet (disabled)
+        bech32_hrp = "tdfc";
+        mweb_hrp = "tdfcmweb";
 
-        vFixedSeeds = std::vector<SeedSpec6>(pnSeed6_test, pnSeed6_test + ARRAYLEN(pnSeed6_test));
+        vFixedSeeds.clear();
 
         fDefaultConsistencyChecks = false;
         fRequireStandard = false;
@@ -288,8 +285,7 @@ public:
 
         checkpointData = {
             {
-                {300, uint256S("54e6075affe658d6574e04c9245a7920ad94dc5af8f5b37fd9a094e317769740")},
-                {2056, uint256S("17748a31ba97afdc9a4f86837a39d287e3e7c7290a08a1d816c5969c78a83289")},
+                {0, uint256S("0x3b714281e102f963bc15948692d18f5e2792bfe5e81d333d25d7f9c563e07f7f")},
             }
         };
 
@@ -321,8 +317,8 @@ public:
         consensus.SegwitHeight = 0; // SEGWIT is always activated on regtest unless overridden
         consensus.MinBIP9WarningHeight = 0;
         consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
-        consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days
-        consensus.nPowTargetSpacing = 2.5 * 60;
+        consensus.nPowTargetTimespan = 1 * 24 * 60 * 60;
+        consensus.nPowTargetSpacing = 2 * 60;
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = true;
         consensus.nRuleChangeActivationThreshold = 108; // 75% for testchains
@@ -343,7 +339,7 @@ public:
 
         consensus.nMinimumChainWork = uint256{};
         consensus.defaultAssumeValid = uint256{};
-
+        consensus.frozen_mweb_output_ids = GetFrozenMWEBOutputIDs();
         pchMessageStart[0] = 0xfa;
         pchMessageStart[1] = 0xbf;
         pchMessageStart[2] = 0xb5;
@@ -363,14 +359,9 @@ public:
 
         UpdateActivationParametersFromArgs(args);
 
-        // DEFCOIN regtest genesis - uses same timestamp message as mainnet
-        // nNonce=0 works with regtest's very low difficulty (0x207fffff)
         genesis = CreateGenesisBlock(1296688602, 0, 0x207fffff, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
-        // The merkle root should match DefCoin's (same coinbase message)
         assert(genesis.hashMerkleRoot == uint256S("0x7294da28c1b8eeba868388b14e2205874fb512f0ca31c2f583002557175f2c9c"));
-        // Note: Genesis hash computed dynamically - will differ from Litecoin due to different merkle root
-        // Actual hash needs to be computed and verified
 
         vFixedSeeds.clear(); //!< Regtest mode doesn't have any fixed seeds.
         vSeeds.clear();      //!< Regtest mode doesn't have any DNS seeds.
@@ -382,7 +373,7 @@ public:
 
         checkpointData = {
             {
-                // Checkpoint will be set after genesis hash is confirmed
+                {0, consensus.hashGenesisBlock},
             }
         };
 
@@ -399,8 +390,8 @@ public:
         base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x35, 0x87, 0xCF};
         base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x35, 0x83, 0x94};
 
-        bech32_hrp = "rltc";
-        mweb_hrp = "tmweb";
+        bech32_hrp = "rdfc";
+        mweb_hrp = "rdfcmweb";
     }
 
     /**

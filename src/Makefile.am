@@ -133,6 +133,7 @@ libmw_a_SOURCES = \
 	libmw/src/mmr/PMMRCache.cpp \
 	libmw/src/mmr/PMMR.cpp \
 	libmw/src/mmr/PruneList.cpp \
+	libmw/src/mmr/Segment.cpp \
 	libmw/src/models/block/Block.cpp \
 	libmw/src/models/crypto/Commitment.cpp \
 	libmw/src/models/crypto/PublicKey.cpp \
@@ -743,7 +744,7 @@ endif
 
 libbitcoinconsensus_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS)
 libbitcoinconsensus_la_LIBADD = $(LIBSECP256K1) $(CRYPTO_LIBS) $(MWEB_LIBS)
-libbitcoinconsensus_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/secp256k1-zkp/include -DBUILD_BITCOIN_INTERNAL $(SSL_CFLAGS) $(LIBMW_CPPFLAGS)
+libbitcoinconsensus_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/secp256k1-zkp/include -DBUILD_BITCOIN_INTERNAL $(SSL_CFLAGS) $(BOOST_CPPFLAGS) $(LIBMW_CPPFLAGS)
 libbitcoinconsensus_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 
 endif

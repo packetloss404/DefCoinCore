@@ -110,7 +110,7 @@ static const char* DEFAULT_ASMAP_FILENAME="ip_asn.map";
 /**
  * The PID file facilities.
  */
-static const char* BITCOIN_PID_FILENAME = "bitcoind.pid";
+static const char* BITCOIN_PID_FILENAME = "defcoind.pid";
 
 static fs::path GetPidFile(const ArgsManager& args)
 {
@@ -407,6 +407,7 @@ void SetupServerArgs(NodeContext& node)
 #endif
     argsman.AddArg("-blockreconstructionextratxn=<n>", strprintf("Extra transactions to keep in memory for compact block reconstructions (default: %u)", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-blocksonly", strprintf("Whether to reject transactions from network peers. Automatic broadcast and rebroadcast of any transactions from inbound peers is disabled, unless the peer has the 'forcerelay' permission. RPC transactions are not affected. (default: %u)", DEFAULT_BLOCKSONLY), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-blockexplorer=<url>", "Default GUI block explorer URL for third party transaction links. Use %s for a transaction hash; a bare explorer URL is converted to a transaction URL where possible.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-conf=<file>", strprintf("Specify path to read-only configuration file. Relative paths will be prefixed by datadir location. (default: %s)", BITCOIN_CONF_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-datadir=<dir>", "Specify data directory", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-dbbatchsize", strprintf("Maximum database write batch size in bytes (default: %u)", nDefaultDbBatchSize), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::OPTIONS);
@@ -445,8 +446,6 @@ void SetupServerArgs(NodeContext& node)
                  ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
     argsman.AddArg("-addnode=<ip>", "Add a node to connect to and attempt to keep the connection open (see the `addnode` RPC command help for more info). This option can be specified multiple times to add multiple nodes.", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
-    argsman.AddArg("-acceptlegacymagic", strprintf("Temporarily accept legacy Litecoin-compatible Defcoin P2P message-start bytes during the Defcoin magic migration (default: %u)", DEFAULT_ACCEPT_LEGACY_MAGIC), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
-    argsman.AddArg("-onlydefcoinua", strprintf("Only keep peers whose advertised user agent starts with /Defcoin, dropping Litecoin-family peers and their address gossip (default: %u)", DEFAULT_DEFCOIN_USER_AGENT_FILTER), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
     argsman.AddArg("-asmap=<file>", strprintf("Specify asn mapping used for bucketing of the peers (default: %s). Relative paths will be prefixed by the net-specific datadir location.", DEFAULT_ASMAP_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-bantime=<n>", strprintf("Default duration (in seconds) of manually configured bans (default: %u)", DEFAULT_MISBEHAVING_BANTIME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-bind=<addr>[:<port>][=onion]", strprintf("Bind to given address and always listen on it (default: 0.0.0.0). Use [host]:port notation for IPv6. Append =onion to tag any incoming connections to that address and port as incoming Tor connections (default: 127.0.0.1:%u=onion, testnet: 127.0.0.1:%u=onion, signet: 127.0.0.1:%u=onion, regtest: 127.0.0.1:%u=onion)", defaultBaseParams->OnionServiceTargetPort(), testnetBaseParams->OnionServiceTargetPort(), signetBaseParams->OnionServiceTargetPort(), regtestBaseParams->OnionServiceTargetPort()), ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
@@ -473,6 +472,9 @@ void SetupServerArgs(NodeContext& node)
     argsman.AddArg("-proxyrandomize", strprintf("Randomize credentials for every proxy connection. This enables Tor stream isolation (default: %u)", DEFAULT_PROXYRANDOMIZE), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-seednode=<ip>", "Connect to a node to retrieve peer addresses, and disconnect. This option can be specified multiple times to connect to multiple nodes.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-networkactive", "Enable all P2P network activity (default: 1). Can be changed by the setnetworkactive RPC command", ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
+    argsman.AddArg("-onlydefcoinua", strprintf("Only accept peers whose advertised user agent starts with /Defcoin (default: %u)", DEFAULT_DEFCOIN_USER_AGENT_FILTER), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-acceptlegacymagic", strprintf("Temporarily accept legacy Litecoin-compatible Defcoin P2P message-start bytes during the Defcoin magic migration (default: %u)", DEFAULT_ACCEPT_LEGACY_MAGIC), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
+    argsman.AddArg("-allowlannodediscovery", strprintf("Allow learning local/private LAN peer addresses from peer address relay (default: %u). Manually configured and inbound LAN peers are not blocked by this setting.", DEFAULT_ALLOW_LAN_NODE_DISCOVERY), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
     argsman.AddArg("-timeout=<n>", strprintf("Specify connection timeout in milliseconds (minimum: 1, default: %d)", DEFAULT_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-peertimeout=<n>", strprintf("Specify p2p connection timeout in seconds. This option determines the amount of time a peer may be inactive before the connection to it is dropped. (minimum: 1, default: %d)", DEFAULT_PEER_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torcontrol=<ip>:<port>", strprintf("Tor control port to use if onion listening enabled (default: %s)", DEFAULT_TOR_CONTROL), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -600,9 +602,11 @@ void SetupServerArgs(NodeContext& node)
 
 std::string LicenseInfo()
 {
-    const std::string URL_SOURCE_CODE = "<https://github.com/defcoin-project/defcoin>";
+    const std::string URL_SOURCE_CODE = "<https://github.com/DefcoinCore/Defcoin-Core-Nu>";
 
-    return CopyrightHolders(strprintf(_("Copyright (C) %i-%i").translated, 2011, COPYRIGHT_YEAR) + " ") + "\n" +
+    return strprintf(_("Copyright (C) %i-%i The Defcoin Core developers").translated, 2014, COPYRIGHT_YEAR) + "\n" +
+           strprintf(_("Copyright (C) %i-%i The Litecoin Core developers").translated, 2011, COPYRIGHT_YEAR) + "\n" +
+           strprintf(_("Copyright (C) %i-%i The Bitcoin Core developers").translated, 2009, COPYRIGHT_YEAR) + "\n" +
            "\n" +
            strprintf(_("Please contribute if you find %s useful. "
                        "Visit %s for further information about the software.").translated,
@@ -612,7 +616,7 @@ std::string LicenseInfo()
                URL_SOURCE_CODE) +
            "\n" +
            "\n" +
-           _("This is experimental software.").translated + "\n" +
+           _("This software is provided without warranty.").translated + "\n" +
            strprintf(_("Distributed under the MIT software license, see the accompanying file %s or %s").translated, "COPYING", "<https://opensource.org/licenses/MIT>") +
            "\n";
 }
@@ -867,15 +871,6 @@ void InitParameterInteraction(ArgsManager& args)
         if (args.SoftSetBoolArg("-whitelistrelay", true))
             LogPrintf("%s: parameter interaction: -whitelistforcerelay=1 -> setting -whitelistrelay=1\n", __func__);
     }
-
-    if (gArgs.IsArgSet("-blockmaxsize")) {
-        unsigned int max_size = gArgs.GetArg("-blockmaxsize", 0);
-        if (gArgs.SoftSetArg("blockmaxweight", strprintf("%d", max_size * WITNESS_SCALE_FACTOR))) {
-            LogPrintf("%s: parameter interaction: -blockmaxsize=%d -> setting -blockmaxweight=%d (-blockmaxsize is deprecated!)\n", __func__, max_size, max_size * WITNESS_SCALE_FACTOR);
-        } else {
-            LogPrintf("%s: Ignoring blockmaxsize setting which is overridden by blockmaxweight", __func__);
-        }
-    }
 }
 
 /**
@@ -887,7 +882,7 @@ void InitParameterInteraction(ArgsManager& args)
 void InitLogging(const ArgsManager& args)
 {
     // MWEB: Initialize MWEB Logger
-    LoggerAPI::Initialize([](const std::string& logstr) { LogPrintf(logstr.c_str()); });
+    LoggerAPI::Initialize([](const std::string& logstr) { LogPrintf("%s",logstr.c_str()); });
 
     LogInstance().m_print_to_file = !args.IsArgNegated("-debuglogfile");
     LogInstance().m_file_path = AbsPathForConfigVal(args.GetArg("-debuglogfile", DEFAULT_DEBUGLOGFILE));
@@ -1013,7 +1008,12 @@ bool AppInitParameterInteraction(const ArgsManager& args)
     }
 
     // parse and validate enabled filter types
+    const bool fReindexChainState = args.GetBoolArg("-reindex-chainstate", false);
+    const bool fPrune = args.GetArg("-prune", 0);
     std::string blockfilterindex_value = args.GetArg("-blockfilterindex", DEFAULT_BLOCKFILTERINDEX);
+    if ((fReindexChainState || fPrune) && !args.IsArgSet("-blockfilterindex")) {
+        blockfilterindex_value = "0";
+    }
     if (blockfilterindex_value == "" || blockfilterindex_value == "1") {
         g_enabled_filter_types = AllBlockFilterTypes();
     } else if (blockfilterindex_value != "0") {
@@ -1028,7 +1028,11 @@ bool AppInitParameterInteraction(const ArgsManager& args)
     }
 
     // Signal NODE_COMPACT_FILTERS if peerblockfilters and basic filters index are both enabled.
-    if (args.GetBoolArg("-peerblockfilters", DEFAULT_PEERBLOCKFILTERS)) {
+    bool peerblockfilters = args.GetBoolArg("-peerblockfilters", DEFAULT_PEERBLOCKFILTERS);
+    if ((fReindexChainState || fPrune) && !args.IsArgSet("-peerblockfilters")) {
+        peerblockfilters = false;
+    }
+    if (peerblockfilters) {
         if (g_enabled_filter_types.count(BlockFilterType::BASIC) != 1) {
             return InitError(_("Cannot set -peerblockfilters without -blockfilterindex."));
         }
@@ -1304,6 +1308,9 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
         LogPrintf("Startup time: %s\n", FormatISO8601DateTime(GetTime()));
     LogPrintf("Default data directory %s\n", GetDefaultDataDir().string());
     LogPrintf("Using data directory %s\n", GetDataDir().string());
+    SetOnlyDefcoinUserAgents(args.GetBoolArg("-onlydefcoinua", DEFAULT_DEFCOIN_USER_AGENT_FILTER));
+    SetAcceptLegacyMagic(args.GetBoolArg("-acceptlegacymagic", DEFAULT_ACCEPT_LEGACY_MAGIC));
+    SetAllowLanNodeDiscovery(args.GetBoolArg("-allowlannodediscovery", DEFAULT_ALLOW_LAN_NODE_DISCOVERY));
 
     // Only log conf file usage message if conf file actually exists.
     fs::path config_file_path = GetConfigFile(args.GetArg("-conf", BITCOIN_CONF_FILENAME));
@@ -1325,9 +1332,9 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     // Warn about relative -datadir path.
     if (args.IsArgSet("-datadir") && !fs::path(args.GetArg("-datadir", "")).is_absolute()) {
         LogPrintf("Warning: relative datadir option '%s' specified, which will be interpreted relative to the " /* Continued */
-                  "current working directory '%s'. This is fragile, because if litecoin is started in the future "
+                  "current working directory '%s'. This is fragile, because if defcoin is started in the future "
                   "from a different location, it will be unable to locate the current data files. There could "
-                  "also be data loss if litecoin is started while in a temporary directory.\n",
+                  "also be data loss if defcoin is started while in a temporary directory.\n",
                   args.GetArg("-datadir", ""), fs::current_path().string());
     }
 
@@ -1351,7 +1358,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     if (script_threads >= 1) {
         g_parallel_script_checks = true;
         for (int i = 0; i < script_threads; ++i) {
-            threadGroup.create_thread([i]() { ThreadScriptCheck(i); });
+            threadGroup.create_thread([i]() { return ThreadScriptCheck(i); });
         }
     }
 
@@ -1390,11 +1397,6 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
             return InitError(_("Unable to start HTTP server. See debug log for details."));
     }
     
-#if defined(USE_SSE2)
-    std::string sse2detect = scrypt_detect_sse2();
-    LogPrintf("%s\n", sse2detect);
-#endif
-
 #if defined(USE_SSE2)
     std::string sse2detect = scrypt_detect_sse2();
     LogPrintf("%s\n", sse2detect);
@@ -1512,10 +1514,6 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     // see Step 2: parameter interactions for more information about these
     fListen = args.GetBoolArg("-listen", DEFAULT_LISTEN);
     fDiscover = args.GetBoolArg("-discover", true);
-    // Defcoin dual-magic migration toggle.
-    SetAcceptLegacyMagic(args.GetBoolArg("-acceptlegacymagic", DEFAULT_ACCEPT_LEGACY_MAGIC));
-    // Defcoin peer hygiene: only keep /Defcoin-prefixed peers.
-    SetOnlyDefcoinUserAgents(args.GetBoolArg("-onlydefcoinua", DEFAULT_DEFCOIN_USER_AGENT_FILTER));
     g_relay_txes = !args.GetBoolArg("-blocksonly", DEFAULT_BLOCKSONLY);
 
     for (const std::string& strAddr : args.GetArgs("-externalip")) {
@@ -1872,7 +1870,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
         nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
 
         // NODE_MWEB requires NODE_WITNESS, so we shouldn't signal for NODE_MWEB without NODE_WITNESS
-        nLocalServices = ServiceFlags(nLocalServices | NODE_MWEB);
+        nLocalServices = ServiceFlags(nLocalServices | NODE_MWEB | NODE_MWEB_LIGHT_CLIENT);
     }
 
     // ********************************************************* Step 11: import blocks

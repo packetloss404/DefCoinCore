@@ -46,6 +46,10 @@ const char *CFHEADERS="cfheaders";
 const char *GETCFCHECKPT="getcfcheckpt";
 const char *CFCHECKPT="cfcheckpt";
 const char *WTXIDRELAY="wtxidrelay";
+const char *MWEBHEADER="mwebheader";
+const char *MWEBLEAFSET="mwebleafset";
+const char *GETMWEBUTXOS="getmwebutxos";
+const char *MWEBUTXOS="mwebutxos";
 } // namespace NetMsgType
 
 /** All known message types. Keep this in the same order as the list of
@@ -86,6 +90,10 @@ const static std::string allNetMessageTypes[] = {
     NetMsgType::GETCFCHECKPT,
     NetMsgType::CFCHECKPT,
     NetMsgType::WTXIDRELAY,
+    NetMsgType::MWEBHEADER,
+    NetMsgType::MWEBLEAFSET,
+    NetMsgType::GETMWEBUTXOS,
+    NetMsgType::MWEBUTXOS,
 };
 const static std::vector<std::string> allNetMessageTypesVec(allNetMessageTypes, allNetMessageTypes+ARRAYLEN(allNetMessageTypes));
 
@@ -138,9 +146,7 @@ bool CMessageHeader::IsCommandValid() const
 
 ServiceFlags GetDesirableServiceFlags(ServiceFlags services) {
     // Defcoin mainnet preserves the historical pre-SegWit chain. Do not require
-    // Litecoin's witness/MWEB service bits when selecting or accepting peers,
-    // otherwise automatic outbound connections reject every real Defcoin node
-    // (which advertises neither) and the node never gets peers.
+    // Litecoin's witness/MWEB service bits when selecting or accepting peers.
     if ((services & NODE_NETWORK_LIMITED) && g_initial_block_download_completed) {
         return ServiceFlags(NODE_NETWORK_LIMITED);
     }
@@ -180,6 +186,8 @@ std::string CInv::GetCommand() const
     case MSG_BLOCK:          return cmd.append(NetMsgType::BLOCK);
     case MSG_FILTERED_BLOCK: return cmd.append(NetMsgType::MERKLEBLOCK);
     case MSG_CMPCT_BLOCK:    return cmd.append(NetMsgType::CMPCTBLOCK);
+    case MSG_MWEB_HEADER:    return cmd.append(NetMsgType::MWEBHEADER);
+    case MSG_MWEB_LEAFSET:   return cmd.append(NetMsgType::MWEBLEAFSET);
     default:
         throw std::out_of_range(strprintf("CInv::GetCommand(): type=%d unknown type", type));
     }
@@ -209,13 +217,14 @@ static std::string serviceFlagToStr(size_t bit)
     const uint64_t service_flag = 1ULL << bit;
     switch ((ServiceFlags)service_flag) {
     case NODE_NONE: abort();  // impossible
-    case NODE_NETWORK:         return "NETWORK";
-    case NODE_GETUTXO:         return "GETUTXO";
-    case NODE_BLOOM:           return "BLOOM";
-    case NODE_WITNESS:         return "WITNESS";
-    case NODE_COMPACT_FILTERS: return "COMPACT_FILTERS";
-    case NODE_NETWORK_LIMITED: return "NETWORK_LIMITED";
-    case NODE_MWEB:            return "MWEB";
+    case NODE_NETWORK:           return "NETWORK";
+    case NODE_GETUTXO:           return "GETUTXO";
+    case NODE_BLOOM:             return "BLOOM";
+    case NODE_WITNESS:           return "WITNESS";
+    case NODE_COMPACT_FILTERS:   return "COMPACT_FILTERS";
+    case NODE_NETWORK_LIMITED:   return "NETWORK_LIMITED";
+    case NODE_MWEB:              return "MWEB";
+    case NODE_MWEB_LIGHT_CLIENT: return "MWEB_LIGHT_CLIENT";
     // Not using default, so we get warned when a case is missing
     }
 

@@ -1828,8 +1828,8 @@ DisconnectResult CChainState::DisconnectBlock(const CBlock& block, const CBlockI
     if (blockUndo.mwundo != nullptr) {
         try {
             view.GetMWEBCacheView()->UndoBlock(blockUndo.mwundo);
-        } catch (const std::exception&) {
-            error("DisconnectBlock(): Failed to disconnect MWEB block");
+        } catch (const std::exception& e) {
+            error("DisconnectBlock(): Failed to disconnect MWEB block: %s", e.what());
             return DISCONNECT_FAILED;
         }
     }
@@ -2711,8 +2711,14 @@ bool CChainState::ConnectTip(BlockValidationState& state, const CChainParams& ch
         bool rv = ConnectBlock(blockConnecting, state, pindexNew, view, chainparams);
         GetMainSignals().BlockChecked(blockConnecting, state);
         if (!rv) {
-            if (state.IsInvalid())
+            if (state.IsInvalid()) {
                 InvalidBlockFound(pindexNew, state);
+                if (state.GetResult() == BlockValidationResult::BLOCK_MUTATED) {
+                    // The same block hash may be valid with different
+                    // non-committed data, so do not retain these bytes.
+                    EraseBlockData(pindexNew);
+                }
+            }
             return error("%s: ConnectBlock %s failed, %s", __func__, pindexNew->GetBlockHash().ToString(), state.ToString());
         }
         nTime3 = GetTimeMicros(); nTimeConnectTotal += nTime3 - nTime2;
@@ -3045,6 +3051,52 @@ bool CChainState::ActivateBestChain(BlockValidationState &state, const CChainPar
 
 bool ActivateBestChain(BlockValidationState &state, const CChainParams& chainparams, std::shared_ptr<const CBlock> pblock) {
     return ::ChainstateActive().ActivateBestChain(state, chainparams, std::move(pblock));
+}
+
+bool ActivateArbitraryChain(BlockValidationState& state, CCoinsViewCache& view, const CChainParams& chainparams, CBlockIndex* pindex)
+{
+    AssertLockHeld(cs_main);
+
+    const CBlockIndex* pindexFork = ::ChainstateActive().m_chain.FindFork(pindex);
+    CBlockIndex* pindexTip = ::ChainstateActive().m_chain.Tip();
+
+    // Disconnect blocks from view until we reach the fork block
+    while (pindexTip->GetBlockHash() != pindexFork->GetBlockHash()) {
+        CBlock block;
+        if (!ReadBlockFromDisk(block, pindexTip, chainparams.GetConsensus())) {
+            return error("ActivateArbitraryChain(): Failed to read block %s", pindexTip->GetBlockHash().ToString());
+        }
+
+        if (::ChainstateActive().DisconnectBlock(block, pindexTip, view) != DISCONNECT_OK) {
+            return error("ActivateArbitraryChain(): DisconnectBlock %s failed", pindexTip->GetBlockHash().ToString());
+        }
+
+        pindexTip = pindexTip->pprev;
+    }
+
+    // Build list of new blocks to connect.
+    std::vector<CBlockIndex*> vpindexToConnect;
+    vpindexToConnect.reserve(pindex->nHeight - pindexTip->nHeight);
+
+    CBlockIndex* pindexIter = pindex;
+    while (pindexIter && pindexIter->nHeight != pindexTip->nHeight) {
+        vpindexToConnect.push_back(pindexIter);
+        pindexIter = pindexIter->pprev;
+    }
+
+    // Connect the new blocks
+    for (CBlockIndex* pindexConnect : reverse_iterate(vpindexToConnect)) {
+        CBlock block;
+        if (!ReadBlockFromDisk(block, pindexConnect, chainparams.GetConsensus())) {
+            return error("ActivateArbitraryChain(): Failed to read block %s", pindexConnect->GetBlockHash().ToString());
+        }
+
+        if (!::ChainstateActive().ConnectBlock(block, state, pindexConnect, view, chainparams, true)) {
+            return error("ActivateArbitraryChain(): ConnectBlock %s failed", pindexConnect->GetBlockHash().ToString());
+        }
+    }
+
+    return true;
 }
 
 bool CChainState::PreciousBlock(BlockValidationState& state, const CChainParams& params, CBlockIndex *pindex)
@@ -4477,6 +4529,16 @@ bool CChainState::RollforwardBlock(const CBlockIndex* pindex, CCoinsViewCache& i
         // Pass check = true as every addition may be an overwrite.
         AddCoins(inputs, *tx, pindex->nHeight, true);
     }
+
+    if (!block.mweb_block.IsNull()) {
+        // ReplayBlocks recovers after undo data was already written, so the
+        // MWEB undo produced here is only needed transiently while applying state.
+        CBlockUndo blockundo;
+        BlockValidationState state;
+        if (!MWEB::Node::ConnectBlock(block, params.GetConsensus(), pindex->pprev, blockundo, *inputs.GetMWEBCacheView(), state)) {
+            return error("ReplayBlock(): MWEB ConnectBlock failed at %d, hash=%s (%s)", pindex->nHeight, pindex->GetBlockHash().ToString(), state.ToString());
+        }
+    }
     return true;
 }
 
@@ -4511,6 +4573,10 @@ bool CChainState::ReplayBlocks(const CChainParams& params)
         pindexFork = LastCommonAncestor(pindexOld, pindexNew);
         assert(pindexFork != nullptr);
     }
+
+    // DB_BEST_BLOCK is erased while DB_HEAD_BLOCKS marks an interrupted flush, so
+    // initialize the MWEB replay cache from the old head tracked in DB_HEAD_BLOCKS.
+    cache.GetMWEBCacheView()->SetBestHeader(pindexOld ? pindexOld->mweb_header : nullptr);
 
     // Rollback along the old branch.
     while (pindexOld != pindexFork) {
@@ -4704,7 +4770,6 @@ void UnloadBlockIndex(CTxMemPool* mempool, ChainstateManager& chainman)
     vinfoBlockFile.clear();
     nLastBlockFile = 0;
     setDirtyBlockIndex.clear();
-    chainman.m_blockman.m_failed_blocks.clear();
     setDirtyFileInfo.clear();
     versionbitscache.Clear();
     for (int b = 0; b < VERSIONBITS_NUM_BITS; b++) {

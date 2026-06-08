@@ -53,6 +53,7 @@ void CCoinsViewDB::ResizeCache(size_t new_cache_size)
     m_db.reset();
     m_db = MakeUnique<CDBWrapper>(
         m_ldb_path, new_cache_size, m_is_memory, /*fWipe*/ false, /*obfuscate*/ true);
+    GetMWEBView()->SetDatabase(std::make_shared<MWEB::DBWrapper>(GetDB()));
 }
 
 bool CCoinsViewDB::GetCoin(const COutPoint &outpoint, Coin &coin) const {
@@ -150,8 +151,9 @@ bool CCoinsViewDB::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock, con
     batch->Erase(DB_HEAD_BLOCKS);
     batch->Write(DB_BEST_BLOCK, hashBlock);
 
+    // Publish the new chainstate tip only after the new MWEB files have been durably written.
     LogPrint(BCLog::COINDB, "Writing final batch of %.2f MiB\n", batch->SizeEstimate() * (1.0 / 1048576.0));
-    bool ret = m_db->WriteBatch(*batch);
+    bool ret = m_db->WriteBatch(*batch, true);
     derivedView->Compact(); // MWEB: Cleanup old MMR files
     LogPrint(BCLog::COINDB, "Committed %u changed transaction outputs (out of %u) to coin database...\n", (unsigned int)changed, (unsigned int)count);
     return ret;

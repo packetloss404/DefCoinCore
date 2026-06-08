@@ -28,18 +28,11 @@
  */
 
 #include <crypto/scrypt.h>
-#ifdef __APPLE__
-#include <sys/endian.h>
-#endif
 
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 #include <openssl/sha.h>
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable:4996) // Disable OpenSSL 3.0 deprecation warnings
-#endif
 
 #if defined(USE_SSE2) && !defined(USE_SSE2_ALWAYS)
 #ifdef _MSC_VER
@@ -50,7 +43,7 @@
 #include <cpuid.h>
 #endif
 #endif
-#if !defined(__FreeBSD__) && !defined(__APPLE__)
+#if !defined(__FreeBSD__) && (!defined(__APPLE__) || defined(be32dec))
 static inline uint32_t be32dec(const void *pp)
 {
 	const uint8_t *p = (uint8_t const *)pp;
@@ -195,9 +188,7 @@ PBKDF2_SHA256(const uint8_t *passwd, size_t passwdlen, const uint8_t *salt,
 
 #define ROTL(a, b) (((a) << (b)) | ((a) >> (32 - (b))))
 
-#ifdef __GNUC__
 __attribute__((no_sanitize("integer")))
-#endif
 static inline void xor_salsa8(uint32_t B[16], const uint32_t Bx[16])
 {
 	uint32_t x00,x01,x02,x03,x04,x05,x06,x07,x08,x09,x10,x11,x12,x13,x14,x15;
@@ -340,6 +331,3 @@ void scrypt_1024_1_1_256(const char *input, char *output)
 	char scratchpad[SCRYPT_SCRATCHPAD_SIZE];
     scrypt_1024_1_1_256_sp(input, output, scratchpad);
 }
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif

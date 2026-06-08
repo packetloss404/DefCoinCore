@@ -5,6 +5,7 @@
 
 #include <wallet/wallet.h>
 
+#include <chainparams.h>
 #include <chain.h>
 #include <consensus/consensus.h>
 #include <consensus/validation.h>
@@ -57,6 +58,12 @@ static const size_t OUTPUT_GROUP_MAX_ENTRIES = 10;
 static RecursiveMutex cs_wallets;
 static std::vector<std::shared_ptr<CWallet>> vpwallets GUARDED_BY(cs_wallets);
 static std::list<LoadWalletFn> g_load_wallet_fns GUARDED_BY(cs_wallets);
+
+static bool IsFrozenMWEBOutput(const CWallet& wallet, const mw::Hash& output_id)
+{
+    const auto& frozen_outputs = Params().GetConsensus().frozen_mweb_output_ids;
+    return std::find(frozen_outputs.begin(), frozen_outputs.end(), uint256(output_id.vec())) != frozen_outputs.end();
+}
 
 bool AddWalletSetting(interfaces::Chain& chain, const std::string& wallet_name)
 {
@@ -1175,6 +1182,49 @@ bool CWallet::AbandonTransaction(const uint256& hashTx)
     return true;
 }
 
+bool CWallet::TransactionCanBeRebroadcast(const uint256& hashTx) const
+{
+    LOCK(cs_wallet);
+
+    // Can't relay if wallet is not broadcasting
+    if (!GetBroadcastTransactions()) return false;
+
+    const CWalletTx* wtx = GetWalletTx(hashTx);
+    return wtx && !wtx->isAbandoned() && wtx->GetDepthInMainChain() == 0;
+}
+
+bool CWallet::RebroadcastTransaction(const uint256& hashTx)
+{
+    LOCK(cs_wallet);
+
+    // Can't relay if wallet is not broadcasting
+    if (!GetBroadcastTransactions()) return false;
+
+    // Can't mark abandoned if confirmed or in mempool
+    auto it = mapWallet.find(hashTx);
+    assert(it != mapWallet.end());
+    const CWalletTx& wtx = it->second;
+
+    // Don't relay abandoned transactions
+    if (wtx.isAbandoned()) return false;
+    // Don't try to submit coinbase or HogEx transactions. These would fail anyway but would
+    // cause log spam.
+    if (wtx.IsCoinBase() || wtx.IsHogEx()) return false;
+    // Don't try to submit conflicted or confirmed transactions.
+    if (wtx.GetDepthInMainChain() != 0) return false;
+
+    // Submit transaction to mempool for relay
+    WalletLogPrintf("Submitting wtx %s to mempool for relay\n", wtx.GetHash().ToString());
+
+    std::string err_string;
+    const bool ret = chain().broadcastTransaction(wtx.tx, m_default_max_tx_fee, true, err_string);
+    if (!ret) {
+        WalletLogPrintf("RebroadcastTransaction(): Transaction cannot be broadcast immediately, %s\n", err_string);
+    }
+
+    return ret;
+}
+
 void CWallet::MarkConflicted(const uint256& hashBlock, int conflicting_height, const uint256& hashTx)
 {
     LOCK(cs_wallet);
@@ -1657,23 +1707,12 @@ CAmount CWallet::GetCredit(const CTransaction& tx, const boost::optional<MWEB::W
             throw std::runtime_error(std::string(__func__) + ": value out of range");
     }
 
-    bool has_my_inputs = false;
-    for (const CTxInput& txin : tx.GetInputs()) {
+    for (const PegOutCoin& pegout : tx.mweb_tx.GetPegOuts()) {
         LOCK(cs_wallet);
-        if (IsMine(txin)) {
-            has_my_inputs = true;
-            break;
-        }
-    }
-
-    if (!has_my_inputs) {
-        for (const PegOutCoin& pegout : tx.mweb_tx.GetPegOuts()) {
-            LOCK(cs_wallet);
-            if (!(IsMine(DestinationAddr(pegout.GetScriptPubKey())) & filter)) {
-                nCredit += pegout.GetAmount();
-                if (!MoneyRange(nCredit))
-                    throw std::runtime_error(std::string(__func__) + ": value out of range");
-            }
+        if (IsMine(DestinationAddr(pegout.GetScriptPubKey())) & filter) {
+            nCredit += pegout.GetAmount();
+            if (!MoneyRange(nCredit))
+                throw std::runtime_error(std::string(__func__) + ": value out of range");
         }
     }
 
@@ -2360,6 +2399,10 @@ CAmount CWalletTx::GetAvailableCredit(bool fUseCache, const isminefilter& filter
     CAmount nCredit = 0;
     for (const CTxOutput& output : GetOutputs())
     {
+        if (output.IsMWEB() && IsFrozenMWEBOutput(*pwallet, output.ToMWEB())) {
+            continue;
+        }
+
         if (!pwallet->IsSpent(output.GetIndex()) && (allow_used_addresses || !pwallet->IsSpentKey(output))) {
             nCredit += pwallet->GetCredit(output, filter);
             if (!MoneyRange(nCredit))
@@ -2657,6 +2700,10 @@ void CWallet::AvailableCoins(std::vector<COutputCoin>& vCoins, bool fOnlySafe, c
             if (coinControl && ((output.IsMWEB() && coinControl->fPegIn) || (!output.IsMWEB() && coinControl->fPegOut)))
                 continue;
 
+            if (output.IsMWEB() && IsFrozenMWEBOutput(*this, output.ToMWEB())) {
+                continue;
+            }
+
             // Only consider selected coins if add_inputs is false
             if (coinControl && !coinControl->m_add_inputs && !coinControl->IsSelected(output.GetIndex())) {
                 continue;
@@ -2864,7 +2911,8 @@ bool CWallet::SelectCoins(const std::vector<COutputCoin>& vAvailableCoins, const
     {
         if (idx.type() == typeid(mw::Hash)) {
             mw::Coin mweb_coin;
-            if (!GetCoin(boost::get<mw::Hash>(idx), mweb_coin) || !mweb_coin.IsMine()) {
+            const mw::Hash& output_id = boost::get<mw::Hash>(idx);
+            if (IsFrozenMWEBOutput(*this, output_id) || !GetCoin(output_id, mweb_coin) || !mweb_coin.IsMine()) {
                 return false;
             }
 

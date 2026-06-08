@@ -604,11 +604,10 @@ CService HTTPRequest::GetPeer() const
     CService peer;
     if (con) {
         // evhttp retains ownership over returned address string
-        char* address = nullptr;
+        const char* address = "";
         uint16_t port = 0;
-        evhttp_connection_get_peer(con, &address, &port);
-        if (address)
-            peer = LookupNumeric(address, port);
+        evhttp_connection_get_peer(con, (char**)&address, &port);
+        peer = LookupNumeric(address, port);
     }
     return peer;
 }

@@ -213,7 +213,7 @@ static RPCHelpMan generatetodescriptor()
         "\nMine blocks immediately to a specified descriptor (before the RPC call returns)\n",
         {
             {"num_blocks", RPCArg::Type::NUM, RPCArg::Optional::NO, "How many blocks are generated immediately."},
-            {"descriptor", RPCArg::Type::STR, RPCArg::Optional::NO, "The descriptor to send the newly generated litecoin to."},
+            {"descriptor", RPCArg::Type::STR, RPCArg::Optional::NO, "The descriptor to send the newly generated defcoin to."},
             {"maxtries", RPCArg::Type::NUM, /* default */ ToString(DEFAULT_MAX_TRIES), "How many iterations to try."},
         },
         RPCResult{
@@ -261,7 +261,7 @@ static RPCHelpMan generatetoaddress()
                 "\nMine blocks immediately to a specified address (before the RPC call returns)\n",
                 {
                     {"nblocks", RPCArg::Type::NUM, RPCArg::Optional::NO, "How many blocks are generated immediately."},
-                    {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The address to send the newly generated litecoin to."},
+                    {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The address to send the newly generated defcoin to."},
                     {"maxtries", RPCArg::Type::NUM, /* default */ ToString(DEFAULT_MAX_TRIES), "How many iterations to try."},
                 },
                 RPCResult{
@@ -272,7 +272,7 @@ static RPCHelpMan generatetoaddress()
                 RPCExamples{
             "\nGenerate 11 blocks to myaddress\n"
             + HelpExampleCli("generatetoaddress", "11 \"myaddress\"")
-            + "If you are using the " PACKAGE_NAME " wallet, you can get a new address to send the newly generated litecoin to with:\n"
+            + "If you are using the " PACKAGE_NAME " wallet, you can get a new address to send the newly generated defcoin to with:\n"
             + HelpExampleCli("getnewaddress", "")
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
@@ -300,7 +300,7 @@ static RPCHelpMan generateblock()
     return RPCHelpMan{"generateblock",
         "\nMine a block with a set of ordered transactions immediately to a specified address or descriptor (before the RPC call returns)\n",
         {
-            {"output", RPCArg::Type::STR, RPCArg::Optional::NO, "The address or descriptor to send the newly generated litecoin to."},
+            {"output", RPCArg::Type::STR, RPCArg::Optional::NO, "The address or descriptor to send the newly generated defcoin to."},
             {"transactions", RPCArg::Type::ARR, RPCArg::Optional::NO, "An array of hex strings which are either txids or raw transactions.\n"
                 "Txids must reference transactions currently in the mempool.\n"
                 "All transactions must be valid and in valid order, otherwise the block will be rejected.",
@@ -670,11 +670,13 @@ static RPCHelpMan getblocktemplate()
     if(!node.connman)
         throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
 
-    if (node.connman->GetNodeCount(CConnman::CONNECTIONS_ALL) == 0)
+    if (!Params().IsTestChain()) {
+        if (node.connman->GetNodeCount(CConnman::CONNECTIONS_ALL) == 0)
         throw JSONRPCError(RPC_CLIENT_NOT_CONNECTED, PACKAGE_NAME " is not connected!");
 
-    if (::ChainstateActive().IsInitialBlockDownload())
-        throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, PACKAGE_NAME " is in initial sync and waiting for blocks...");
+        if (::ChainstateActive().IsInitialBlockDownload())
+            throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, PACKAGE_NAME " is in initial sync and waiting for blocks...");
+    }
 
     static unsigned int nTransactionsUpdatedLast;
     const CTxMemPool& mempool = EnsureMemPool(request.context);

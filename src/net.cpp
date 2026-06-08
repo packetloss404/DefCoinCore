@@ -54,6 +54,9 @@ static_assert(MINIUPNPC_API_VERSION >= 10, "miniUPnPc API version >= 10 assumed"
 /** Maximum number of block-relay-only anchor connections */
 static constexpr size_t MAX_BLOCK_RELAY_ONLY_ANCHORS = 2;
 static_assert (MAX_BLOCK_RELAY_ONLY_ANCHORS <= static_cast<size_t>(MAX_BLOCK_RELAY_ONLY_CONNECTIONS), "MAX_BLOCK_RELAY_ONLY_ANCHORS must not exceed MAX_BLOCK_RELAY_ONLY_CONNECTIONS.");
+static_assert(
+    MAX_PROTOCOL_MESSAGE_LENGTH > MAX_BLOCK_SERIALIZED_SIZE_WITH_MWEB,
+    "MAX_PROTOCOL_MESSAGE_LENGTH must exceed MAX_BLOCK_SERIALIZED_SIZE_WITH_MWEB.");
 /** Anchor IP address database file name */
 const char* const ANCHORS_DATABASE_FILENAME = "anchors.dat";
 
@@ -75,15 +78,15 @@ static constexpr int DNSSEEDS_TO_QUERY_AT_ONCE = 3;
 static constexpr std::chrono::seconds DNSSEEDS_DELAY_FEW_PEERS{11};
 static constexpr std::chrono::minutes DNSSEEDS_DELAY_MANY_PEERS{5};
 static constexpr int DNSSEEDS_DELAY_PEER_THRESHOLD = 1000; // "many" vs "few" peers
+static constexpr std::chrono::seconds DEFCOIN_DNSSEEDS_DELAY{11};
+static constexpr std::chrono::seconds DEFCOIN_FIXED_SEED_ADDRMAN_DELAY{15};
+static constexpr int DEFCOIN_DNSSEED_MIN_OUTBOUND_PEERS = 8;
+static constexpr int DEFCOIN_FIXED_SEED_MIN_OUTBOUND_PEERS = 4;
+static constexpr int DEFCOIN_ALT_PORT = 10332;
+static constexpr int DEFCOIN_PREFERRED_PORT_TRIES = 300;
+static constexpr int DEFCOIN_ADDRMAN_TRIES = 500;
 
-// We add a random period time (0 to 1 seconds) to feeler connections to prevent synchronization.
-#define FEELER_SLEEP_WINDOW 1
-
-// Defcoin dual-magic migration state ------------------------------------------
-// Whether to accept the legacy Litecoin-compatible P2P magic in addition to the
-// Defcoin-specific magic. Toggled at startup via -acceptlegacymagic.
 static std::atomic_bool g_accept_legacy_message_start{DEFAULT_ACCEPT_LEGACY_MAGIC};
-// Round-robins occasional legacy-magic outbound attempts during migration.
 static std::atomic<uint64_t> g_legacy_outbound_probe_counter{0};
 
 void SetAcceptLegacyMagic(bool enabled)
@@ -101,6 +104,34 @@ static bool IsDefcoinMainnet()
     return Params().NetworkIDString() == CBaseChainParams::MAIN;
 }
 
+static bool UseLegacyOutboundMagic(ConnectionType conn_type, const CAddress& addr, const std::string& addr_name)
+{
+    if (!IsDefcoinMainnet() || !GetAcceptLegacyMagic()) {
+        return false;
+    }
+
+    if (conn_type == ConnectionType::ADDR_FETCH) {
+        return true;
+    }
+
+    if (conn_type != ConnectionType::OUTBOUND_FULL_RELAY && conn_type != ConnectionType::MANUAL) {
+        return false;
+    }
+
+    const bool likely_legacy_endpoint = addr.GetPort() == Params().GetDefaultPort()
+        || addr_name.find(":") == std::string::npos
+        || addr_name.find(":1337") != std::string::npos;
+
+    if (!likely_legacy_endpoint) {
+        return false;
+    }
+
+    // Prefer Defcoin-specific magic for convergence, but keep a bounded legacy
+    // probe path so compatibility mode can still reach old-only Defcoin peers.
+    const uint64_t probe = g_legacy_outbound_probe_counter.fetch_add(1, std::memory_order_relaxed);
+    return (probe % 4) == 3;
+}
+
 static std::string MessageStartHex(const CMessageHeader::MessageStartChars& message_start)
 {
     return strprintf("%02x%02x%02x%02x",
@@ -110,33 +141,13 @@ static std::string MessageStartHex(const CMessageHeader::MessageStartChars& mess
                      static_cast<unsigned int>(message_start[3]));
 }
 
-// Decide whether a new outbound connection should open using legacy magic.
-// We prefer the Defcoin magic, but during migration many reachable peers are
-// still legacy-only, so for likely-legacy endpoints we probe legacy half the
-// time. ADDR_FETCH (seed) connections always use legacy for widest reach.
-static bool UseLegacyOutboundMagic(ConnectionType conn_type, const CAddress& addr, const std::string& addr_name)
+static bool IsDefcoinPreferredPort(uint16_t port)
 {
-    if (!IsDefcoinMainnet() || !GetAcceptLegacyMagic()) {
-        return false;
-    }
-    if (conn_type == ConnectionType::ADDR_FETCH) {
-        return true;
-    }
-    if (conn_type != ConnectionType::OUTBOUND_FULL_RELAY && conn_type != ConnectionType::MANUAL) {
-        return false;
-    }
-    // During the migration window prefer legacy magic for outbound: every
-    // Defcoin node (both legacy and Nu, which accepts legacy by default)
-    // understands it, so it maximizes connectivity while the network is still
-    // mostly legacy. Occasionally probe the new Defcoin magic so it keeps
-    // getting exercised. Litecoin isolation is enforced separately by the
-    // /Defcoin user-agent filter, not by the outbound magic choice.
-    (void)addr;
-    (void)addr_name;
-    const uint64_t probe = g_legacy_outbound_probe_counter.fetch_add(1, std::memory_order_relaxed);
-    return (probe % 4) != 0; // ~75% legacy, ~25% defc014e probe
+    return port == Params().GetDefaultPort() || port == DEFCOIN_ALT_PORT;
 }
-// -----------------------------------------------------------------------------
+
+// We add a random period time (0 to 1 seconds) to feeler connections to prevent synchronization.
+#define FEELER_SLEEP_WINDOW 1
 
 // MSG_NOSIGNAL is not available on some platforms, if it doesn't exist define it as 0
 #if !defined(MSG_NOSIGNAL)
@@ -216,22 +227,23 @@ bool GetLocal(CService& addr, const CNetAddr *paddrPeer)
     return nBestScore >= 0;
 }
 
-//! Convert the pnSeed6 array into usable address objects.
-static std::vector<CAddress> convertSeed6(const std::vector<SeedSpec6> &vSeedsIn)
+//! Convert the serialized seeds into usable address objects.
+static std::vector<CAddress> ConvertSeeds(const std::vector<uint8_t>& vSeedsIn, bool log = true)
 {
     // It'll only connect to one or two seed nodes because once it connects,
     // it'll get a pile of addresses with newer timestamps.
     // Seed nodes are given a random 'last seen time' of between one and two
     // weeks ago.
-    const int64_t nOneWeek = 7*24*60*60;
+    const int64_t nOneWeek = 7 * 24 * 60 * 60;
     std::vector<CAddress> vSeedsOut;
-    vSeedsOut.reserve(vSeedsIn.size());
     FastRandomContext rng;
-    for (const auto& seed_in : vSeedsIn) {
-        struct in6_addr ip;
-        memcpy(&ip, seed_in.addr, sizeof(ip));
-        CAddress addr(CService(ip, seed_in.port), GetDesirableServiceFlags(NODE_NONE));
+    CDataStream s(vSeedsIn, SER_NETWORK, PROTOCOL_VERSION | ADDRV2_FORMAT);
+    while (!s.eof()) {
+        CService endpoint;
+        s >> endpoint;
+        CAddress addr{endpoint, GetDesirableServiceFlags(NODE_NONE)};
         addr.nTime = GetTime() - rng.randrange(nOneWeek) - nOneWeek;
+        if (log) LogPrint(BCLog::NET, "Added hardcoded seed: %s\n", addr.ToString());
         vSeedsOut.push_back(addr);
     }
     return vSeedsOut;
@@ -541,8 +553,9 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
     NodeId id = GetNewNodeId();
     uint64_t nonce = GetDeterministicRandomizer(RANDOMIZER_ID_LOCALHOSTNONCE).Write(id).Finalize();
     CAddress addr_bind = GetBindAddress(hSocket);
-    const bool use_legacy_outbound_magic = UseLegacyOutboundMagic(conn_type, addrConnect, pszDest ? pszDest : "");
-    CNode* pnode = new CNode(id, nLocalServices, GetBestHeight(), hSocket, addrConnect, CalculateKeyedNetGroup(addrConnect), nonce, addr_bind, pszDest ? pszDest : "", conn_type, /*inbound_onion=*/false, use_legacy_outbound_magic);
+    const std::string addr_name = pszDest ? pszDest : "";
+    const bool use_legacy_outbound_magic = UseLegacyOutboundMagic(conn_type, addrConnect, addr_name);
+    CNode* pnode = new CNode(id, nLocalServices, GetBestHeight(), hSocket, addrConnect, CalculateKeyedNetGroup(addrConnect), nonce, addr_bind, addr_name, conn_type, false, use_legacy_outbound_magic);
     pnode->AddRef();
 
     // We're making a new connection, harvest entropy from the time (and our peer count)
@@ -643,12 +656,6 @@ void CNode::copyStats(CNodeStats &stats, const std::vector<bool> &m_asmap)
     X(nTimeOffset);
     stats.addrName = GetAddrName();
     X(nVersion);
-    // Defcoin dual-magic diagnostics: report the magic selected from this peer.
-    if (m_deserializer) {
-        stats.m_message_start_selected = m_deserializer->MessageStartSelected();
-        stats.m_using_legacy_magic = m_deserializer->UsingLegacyMagic();
-        stats.m_message_start_hex = MessageStartHex(m_deserializer->ActiveMessageStart());
-    }
     {
         LOCK(cs_SubVer);
         X(cleanSubVer);
@@ -665,6 +672,9 @@ void CNode::copyStats(CNodeStats &stats, const std::vector<bool> &m_asmap)
         LOCK(cs_vRecv);
         X(mapRecvBytesPerMsgCmd);
         X(nRecvBytes);
+        stats.m_message_start_selected = m_deserializer->MessageStartSelected();
+        stats.m_using_legacy_magic = m_deserializer->UsingLegacyMagic();
+        stats.m_message_start_hex = MessageStartHex(m_deserializer->ActiveMessageStart());
     }
     X(m_legacyWhitelisted);
     X(m_permissionFlags);
@@ -723,9 +733,6 @@ bool CNode::ReceiveMsgBytes(const char *pch, unsigned int nBytes, bool& complete
             // Serious header problem, disconnect from the peer.
             return false;
         }
-
-        // Defcoin dual-magic: once the peer's magic is locked in by the
-        // deserializer, send our replies with the same magic.
         if (m_deserializer->MessageStartSelected()) {
             m_serializer->SetMessageStart(m_deserializer->ActiveMessageStart());
         }
@@ -764,34 +771,41 @@ bool CNode::ReceiveMsgBytes(const char *pch, unsigned int nBytes, bool& complete
 
 bool V1TransportDeserializer::MatchMessageStart(const CMessageHeader::MessageStartChars& message_start) const
 {
-    return memcmp(hdr.pchMessageStart, message_start, CMessageHeader::MESSAGE_START_SIZE) == 0;
+    const unsigned int nCheck = std::min<unsigned int>(nHdrPos, CMessageHeader::MESSAGE_START_SIZE);
+    for (unsigned int i = 0; i < nCheck; ++i) {
+        if (static_cast<unsigned char>(hdrbuf[i]) != message_start[i]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool V1TransportDeserializer::TrySelectMessageStart()
 {
     if (m_message_start_selected) {
-        // Magic already locked for this peer; every later header must match it.
         return MatchMessageStart(m_active_message_start);
     }
 
-    const bool matches_defcoin = MatchMessageStart(m_chain_params.MessageStartDefcoinMagic());
+    const bool matches_network = MatchMessageStart(m_chain_params.MessageStartDefcoinMagic());
     const bool matches_legacy = GetAcceptLegacyMagic() && MatchMessageStart(m_chain_params.MessageStartLegacyMagic());
-    if (!matches_defcoin && !matches_legacy) {
+    if (!matches_network && !matches_legacy) {
         return false;
     }
 
-    // Prefer the Defcoin-specific magic when both would match.
-    const CMessageHeader::MessageStartChars& selected = matches_defcoin
-        ? m_chain_params.MessageStartDefcoinMagic()
-        : m_chain_params.MessageStartLegacyMagic();
-    for (unsigned int i = 0; i < CMessageHeader::MESSAGE_START_SIZE; ++i) {
-        m_active_message_start[i] = selected[i];
+    if (nHdrPos >= CMessageHeader::MESSAGE_START_SIZE) {
+        const CMessageHeader::MessageStartChars& selected = matches_network
+            ? m_chain_params.MessageStartDefcoinMagic()
+            : m_chain_params.MessageStartLegacyMagic();
+        for (unsigned int i = 0; i < CMessageHeader::MESSAGE_START_SIZE; ++i) {
+            m_active_message_start[i] = selected[i];
+        }
+        m_message_start_selected = true;
+        m_using_legacy_magic = !matches_network;
+        if (m_using_legacy_magic) {
+            LogPrint(BCLog::NET, "Using legacy Litecoin-compatible message start for peer=%d\n", m_node_id);
+        }
     }
-    m_message_start_selected = true;
-    m_using_legacy_magic = !matches_defcoin;
-    if (m_using_legacy_magic) {
-        LogPrint(BCLog::NET, "Using legacy Litecoin-compatible message start for peer=%d\n", m_node_id);
-    }
+
     return true;
 }
 
@@ -803,6 +817,11 @@ int V1TransportDeserializer::readHeader(const char *pch, unsigned int nBytes)
 
     memcpy(&hdrbuf[nHdrPos], pch, nCopy);
     nHdrPos += nCopy;
+
+    if (!TrySelectMessageStart()) {
+        LogPrint(BCLog::NET, "HEADER ERROR - MESSAGESTART prefix, peer=%d\n", m_node_id);
+        return -1;
+    }
 
     // if header incomplete, exit
     if (nHdrPos < CMessageHeader::HEADER_SIZE)
@@ -817,10 +836,8 @@ int V1TransportDeserializer::readHeader(const char *pch, unsigned int nBytes)
         return -1;
     }
 
-    // Check start string, network magic. Defcoin accepts its own magic and,
-    // during the migration window, the legacy Litecoin-compatible magic. The
-    // chosen magic is locked per peer on the first valid header.
-    if (!TrySelectMessageStart()) {
+    // Check start string, network magic
+    if (memcmp(hdr.pchMessageStart, m_active_message_start, CMessageHeader::MESSAGE_START_SIZE) != 0) {
         LogPrint(BCLog::NET, "HEADER ERROR - MESSAGESTART (%s, %u bytes), received %s, peer=%d\n", hdr.GetCommand(), hdr.nMessageSize, HexStr(hdr.pchMessageStart), m_node_id);
         return -1;
     }
@@ -899,11 +916,23 @@ Optional<CNetMessage> V1TransportDeserializer::GetMessage(const std::chrono::mic
     return msg;
 }
 
+V1TransportSerializer::V1TransportSerializer(const CMessageHeader::MessageStartChars& message_start)
+{
+    SetMessageStart(message_start);
+}
+
+void V1TransportSerializer::SetMessageStart(const CMessageHeader::MessageStartChars& message_start)
+{
+    for (unsigned int i = 0; i < CMessageHeader::MESSAGE_START_SIZE; ++i) {
+        m_message_start[i] = message_start[i];
+    }
+}
+
 void V1TransportSerializer::prepareForTransport(CSerializedNetMsg& msg, std::vector<unsigned char>& header) {
     // create dbl-sha256 checksum
     uint256 hash = Hash(msg.data);
 
-    // create header (Defcoin dual-magic: use this peer's selected message-start)
+    // create header
     CMessageHeader hdr(m_message_start, msg.m_type.c_str(), msg.data.size());
     memcpy(hdr.pchChecksum, hash.begin(), CMessageHeader::CHECKSUM_SIZE);
 
@@ -1265,6 +1294,42 @@ void CConnman::AcceptConnection(const ListenSocket& hListenSocket) {
 
     // We received a new connection, harvest entropy from the time (and our peer count)
     RandAddEvent((uint32_t)id);
+}
+
+bool CConnman::AddConnection(const std::string& address, ConnectionType conn_type)
+{
+    Optional<int> max_connections;
+    switch (conn_type) {
+    case ConnectionType::INBOUND:
+    case ConnectionType::MANUAL:
+        return false;
+    case ConnectionType::OUTBOUND_FULL_RELAY:
+        max_connections = m_max_outbound_full_relay;
+        break;
+    case ConnectionType::BLOCK_RELAY:
+        max_connections = m_max_outbound_block_relay;
+        break;
+    // no limit for ADDR_FETCH because -seednode has no limit either
+    case ConnectionType::ADDR_FETCH:
+        break;
+    // no limit for FEELER connections since they're short-lived
+    case ConnectionType::FEELER:
+        break;
+    } // no default case, so the compiler can warn about missing cases
+
+    // Count existing connections
+    int existing_connections = WITH_LOCK(cs_vNodes,
+                                         return std::count_if(vNodes.begin(), vNodes.end(), [conn_type](CNode* node) { return node->m_conn_type == conn_type; }););
+
+    // Max connections of specified type already exist
+    if (max_connections != nullopt && existing_connections >= max_connections) return false;
+
+    // Max total outbound connections already exist
+    CSemaphoreGrant grant(*semOutbound, true);
+    if (!grant) return false;
+
+    OpenNetworkConnection(CAddress(), false, &grant, address.c_str(), conn_type);
+    return true;
 }
 
 void CConnman::DisconnectNodes()
@@ -1707,8 +1772,12 @@ static void ThreadMapPort()
     struct IGDdatas data;
     int r;
 
+#if MINIUPNPC_API_VERSION >= 18
     char wanaddr[40] = "";
     r = UPNP_GetValidIGD(devlist, &urls, &data, lanaddr, sizeof(lanaddr), wanaddr, sizeof(wanaddr));
+#else
+    r = UPNP_GetValidIGD(devlist, &urls, &data, lanaddr, sizeof(lanaddr));
+#endif
     if (r == 1)
     {
         if (fDiscover) {
@@ -1826,7 +1895,9 @@ void CConnman::ThreadDNSAddressSeed()
     // * If we continue having problems, eventually query all the
     //   DNS seeds, and if that fails too, also try the fixed seeds.
     //   (done in ThreadOpenConnections)
-    const std::chrono::seconds seeds_wait_time = (addrman.size() >= DNSSEEDS_DELAY_PEER_THRESHOLD ? DNSSEEDS_DELAY_MANY_PEERS : DNSSEEDS_DELAY_FEW_PEERS);
+    const std::chrono::seconds seeds_wait_time = IsDefcoinMainnet()
+        ? DEFCOIN_DNSSEEDS_DELAY
+        : (addrman.size() >= DNSSEEDS_DELAY_PEER_THRESHOLD ? DNSSEEDS_DELAY_MANY_PEERS : DNSSEEDS_DELAY_FEW_PEERS);
 
     for (const std::string& seed : seeds) {
         if (seeds_right_now == 0) {
@@ -1850,7 +1921,8 @@ void CConnman::ThreadDNSAddressSeed()
                             if (pnode->fSuccessfullyConnected && pnode->IsOutboundOrBlockRelayConn()) ++nRelevant;
                         }
                     }
-                    if (nRelevant >= 2) {
+                    const int min_seed_peers = IsDefcoinMainnet() ? DEFCOIN_DNSSEED_MIN_OUTBOUND_PEERS : 2;
+                    if (nRelevant >= min_seed_peers) {
                         if (found > 0) {
                             LogPrintf("%d addresses found from DNS seeds\n", found);
                             LogPrintf("P2P peers available. Finished DNS seeding.\n");
@@ -1878,19 +1950,43 @@ void CConnman::ThreadDNSAddressSeed()
             AddAddrFetch(seed);
         } else {
             std::vector<CNetAddr> vIPs;
+            std::vector<CService> vServices;
             std::vector<CAddress> vAdd;
             ServiceFlags requiredServiceBits = GetDesirableServiceFlags(NODE_NONE);
-            std::string host = strprintf("x%x.%s", requiredServiceBits, seed);
+            int seed_port = 0;
+            std::string seed_host;
+            SplitHostPort(seed, seed_port, seed_host);
+            if (seed_host.empty()) seed_host = seed;
+            const bool explicit_seed_port = seed_port > 0;
+            std::string host = explicit_seed_port ? seed_host : strprintf("x%x.%s", requiredServiceBits, seed);
             CNetAddr resolveSource;
             if (!resolveSource.SetInternal(host)) {
                 continue;
             }
             unsigned int nMaxIPs = 256; // Limits number of IPs learned from a DNS seed
-            if (LookupHost(host, vIPs, nMaxIPs, true)) {
+            if (explicit_seed_port || !LookupHost(host, vIPs, nMaxIPs, true)) {
+                // Defcoin currently uses ordinary node hostnames as seeds in
+                // addition to DNS seed infrastructure. If the service-bit
+                // prefixed lookup is not supported, fall back to the hostname
+                // itself. Use Lookup() here so explicit host:port seeds for
+                // non-default public nodes keep their advertised port.
+                Lookup(seed, vServices, Params().GetDefaultPort(), true, nMaxIPs);
+                if (explicit_seed_port && IsDefcoinMainnet()) {
+                    LogPrint(BCLog::NET, "Defcoin DNS seed %s resolved through explicit host:port path\n", seed);
+                }
+            }
+            if (!vIPs.empty() || !vServices.empty()) {
                 for (const CNetAddr& ip : vIPs) {
                     int nOneDay = 24*3600;
                     CAddress addr = CAddress(CService(ip, Params().GetDefaultPort()), requiredServiceBits);
                     addr.nTime = GetTime() - 3*nOneDay - rng.randrange(4*nOneDay); // use a random age between 3 and 7 days old
+                    vAdd.push_back(addr);
+                    found++;
+                }
+                for (const CService& service : vServices) {
+                    int nOneDay = 24*3600;
+                    CAddress addr = CAddress(service, requiredServiceBits);
+                    addr.nTime = GetTime() - 3*nOneDay - rng.randrange(4*nOneDay);
                     vAdd.push_back(addr);
                     found++;
                 }
@@ -1993,6 +2089,9 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
 
     // Minimum time before next feeler connection (in microseconds).
     int64_t nNextFeeler = PoissonNextSend(nStart*1000*1000, FEELER_INTERVAL);
+    int64_t nLastDefcoinFixedSeedTry = 0;
+    size_t defcoin_fixed_seed_cursor = 0;
+    std::set<CService> defcoin_preferred_gossip_attempted;
     while (!interruptNet)
     {
         ProcessAddrFetch();
@@ -2004,25 +2103,26 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
         if (interruptNet)
             return;
 
-        // Add the compiled fixed seeds if we still have no outbound peers after
-        // the grace period. Defcoin's public DNS seeds are thin and sometimes
-        // return only a few stale addresses; upstream only fell back to fixed
-        // seeds on a *completely empty* addrman, so those stale addresses used
-        // to suppress the fallback and leave the node stuck at 0 peers.
-        int num_outbound_peers = 0;
+        // Add seed nodes if DNS seeds are all down (an infrastructure attack?).
+        // Note that Bitcoin/Litecoin only do this if we started with an empty
+        // peers.dat, but Defcoin's current network is small. If we still have
+        // very few outbound peers after startup, also inject the curated fixed
+        // seeds.
+        int nCurrentFullRelay = 0;
         {
             LOCK(cs_vNodes);
             for (const CNode* pnode : vNodes) {
-                if (pnode->IsFullOutboundConn() || pnode->IsBlockOnlyConn()) ++num_outbound_peers;
+                if (pnode->fSuccessfullyConnected && pnode->IsFullOutboundConn()) ++nCurrentFullRelay;
             }
         }
-        if (num_outbound_peers == 0 && (GetTime() - nStart > 60)) {
+        const int64_t fixed_seed_delay = IsDefcoinMainnet() ? DEFCOIN_FIXED_SEED_ADDRMAN_DELAY.count() : 60;
+        if ((addrman.size() == 0 || (IsDefcoinMainnet() && nCurrentFullRelay < DEFCOIN_FIXED_SEED_MIN_OUTBOUND_PEERS)) && (GetTime() - nStart > fixed_seed_delay)) {
             static bool done = false;
             if (!done) {
-                LogPrintf("Adding fixed seed nodes (no outbound peers; DNS seeds unavailable or stale).\n");
+                LogPrintf("Adding fixed seed nodes as DNS/addrman peer coverage is low.\n");
                 CNetAddr local;
                 local.SetInternal("fixedseeds");
-                addrman.Add(convertSeed6(Params().FixedSeeds()), local);
+                addrman.Add(ConvertSeeds(Params().FixedSeeds()), local);
                 done = true;
             }
         }
@@ -2098,7 +2198,49 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
 
         int64_t nANow = GetAdjustedTime();
         int nTries = 0;
-        while (!interruptNet)
+        if (IsDefcoinMainnet() && conn_type == ConnectionType::OUTBOUND_FULL_RELAY && nCurrentFullRelay < DEFCOIN_FIXED_SEED_MIN_OUTBOUND_PEERS && GetTime() - nLastDefcoinFixedSeedTry > 15) {
+            nLastDefcoinFixedSeedTry = GetTime();
+            const std::vector<CAddress> fixed_seeds = ConvertSeeds(Params().FixedSeeds(), false);
+            for (size_t i = 0; i < fixed_seeds.size(); ++i) {
+                const CAddress& seed = fixed_seeds[(defcoin_fixed_seed_cursor + i) % fixed_seeds.size()];
+                if (!seed.IsValid() || IsLocal(seed) || !IsReachable(seed) || AlreadyConnectedToAddress(seed)) continue;
+                if (setConnected.count(seed.GetGroup(addrman.m_asmap))) continue;
+                if (!HasAllDesirableServiceFlags(seed.nServices)) continue;
+                addrConnect = seed;
+                defcoin_fixed_seed_cursor = (defcoin_fixed_seed_cursor + i + 1) % fixed_seeds.size();
+                LogPrint(BCLog::NET, "Trying Defcoin fixed seed connection to %s due to low peer coverage\n", addrConnect.ToString());
+                break;
+            }
+        }
+        if (IsDefcoinMainnet() && conn_type == ConnectionType::OUTBOUND_FULL_RELAY && !addrConnect.IsValid()) {
+            std::vector<CAddress> preferred_addrs = addrman.GetAddr(0, 100);
+            FastRandomContext insecure_rand;
+            Shuffle(preferred_addrs.begin(), preferred_addrs.end(), insecure_rand);
+            std::stable_sort(preferred_addrs.begin(), preferred_addrs.end(), [](const CAddress& a, const CAddress& b) {
+                const bool a_alt = a.GetPort() == DEFCOIN_ALT_PORT;
+                const bool b_alt = b.GetPort() == DEFCOIN_ALT_PORT;
+                if (a_alt != b_alt) return a_alt;
+                const bool a_preferred = IsDefcoinPreferredPort(a.GetPort());
+                const bool b_preferred = IsDefcoinPreferredPort(b.GetPort());
+                if (a_preferred != b_preferred) return a_preferred;
+                return a.nTime > b.nTime;
+            });
+            for (int pass = 0; pass < 2 && !addrConnect.IsValid(); ++pass) {
+                for (const CAddress& addr : preferred_addrs) {
+                    if (pass == 0 && addr.GetPort() != DEFCOIN_ALT_PORT) continue;
+                    if (pass == 1 && !IsDefcoinPreferredPort(addr.GetPort())) continue;
+                    if (defcoin_preferred_gossip_attempted.count(addr)) continue;
+                    if (!addr.IsValid() || IsLocal(addr) || !IsReachable(addr) || AlreadyConnectedToAddress(addr)) continue;
+                    if (setConnected.count(addr.GetGroup(addrman.m_asmap))) continue;
+                    if (!HasAllDesirableServiceFlags(addr.nServices)) continue;
+                    addrConnect = addr;
+                    defcoin_preferred_gossip_attempted.insert(addr);
+                    LogPrint(BCLog::NET, "Trying Defcoin preferred gossiped peer %s from addrman\n", addrConnect.ToString());
+                    break;
+                }
+            }
+        }
+        while (!interruptNet && !addrConnect.IsValid())
         {
             if (anchor && !m_anchors.empty()) {
                 const CAddress addr = m_anchors.back();
@@ -2111,11 +2253,16 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
                 break;
             }
 
-            // If we didn't find an appropriate destination after trying 100 addresses fetched from addrman,
+            // If we didn't find an appropriate destination after trying a bounded set of addresses fetched from addrman,
             // stop this loop, and let the outer loop run again (which sleeps, adds seed nodes, recalculates
             // already-connected network ranges, ...) before trying new addrman addresses.
+            //
+            // Defcoin's inherited addrman may contain a large number of old Litecoin-style
+            // 9333 endpoints. Spend more attempts on mainnet, and prefer currently observed
+            // Defcoin service ports before falling back to the broader address set.
             nTries++;
-            if (nTries > 100)
+            const int max_addrman_tries = IsDefcoinMainnet() && !fFeeler ? DEFCOIN_ADDRMAN_TRIES : 100;
+            if (nTries > max_addrman_tries)
                 break;
 
             CAddrInfo addr;
@@ -2146,6 +2293,9 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
 
             // Require outbound connections, other than feelers, to be to distinct network groups
             if (!fFeeler && setConnected.count(addr.GetGroup(addrman.m_asmap))) {
+                if (IsDefcoinMainnet()) {
+                    continue;
+                }
                 break;
             }
 
@@ -2156,6 +2306,10 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
 
             if (!IsReachable(addr))
                 continue;
+
+            if (IsDefcoinMainnet() && !fFeeler && nTries < DEFCOIN_PREFERRED_PORT_TRIES && !IsDefcoinPreferredPort(addr.GetPort())) {
+                continue;
+            }
 
             // only consider very recently tried nodes after 30 failed attempts
             if (nANow - addr.nLastTry < 600 && nTries < 30)
@@ -2175,7 +2329,13 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
             // from advertising themselves as a service on another host and
             // port, causing a DoS attack as nodes around the network attempt
             // to connect to it fruitlessly.
-            if (addr.GetPort() != Params().GetDefaultPort() && nTries < 50)
+            //
+            // Defcoin's active legacy network has a small peer set and some
+            // reachable historical nodes advertise non-default service ports.
+            // Permit discovered Defcoin mainnet addresses on those ports
+            // instead of applying Litecoin's default-port preference.
+            const bool allow_defcoin_non_default_port = IsDefcoinMainnet();
+            if (!allow_defcoin_non_default_port && addr.GetPort() != Params().GetDefaultPort() && nTries < 50)
                 continue;
 
             addrConnect = addr;
@@ -2190,6 +2350,10 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
                 if (!interruptNet.sleep_for(std::chrono::milliseconds(randsleep)))
                     return;
                 LogPrint(BCLog::NET, "Making feeler connection to %s\n", addrConnect.ToString());
+            }
+            if (IsDefcoinMainnet() && (addrConnect.GetPort() == 10332 || addrConnect.IsIPv6())) {
+                LogPrint(BCLog::NET, "Trying Defcoin %s outbound connection to %s\n",
+                         addrConnect.IsIPv6() ? "IPv6/non-default-port" : "non-default-port", addrConnect.ToString());
             }
 
             OpenNetworkConnection(addrConnect, (int)setConnected.size() >= std::min(nMaxConnections - 1, 2), &grant, nullptr, conn_type);
@@ -2794,8 +2958,25 @@ void CConnman::MarkAddressGood(const CAddress& addr)
     addrman.Good(addr);
 }
 
+bool CConnman::AddAndMarkAddressGood(const CAddress& addr)
+{
+    if (IsDefcoinMainnet()) {
+        return addrman.AddAndMarkGoodReplacingSameIP(addr);
+    }
+    return addrman.AddAndMarkGood(addr);
+}
+
 bool CConnman::AddNewAddresses(const std::vector<CAddress>& vAddr, const CAddress& addrFrom, int64_t nTimePenalty)
 {
+    if (IsDefcoinMainnet()) {
+        bool added = false;
+        for (const CAddress& addr : vAddr) {
+            if (IsDefcoinPreferredPort(addr.GetPort())) {
+                added |= addrman.AddReplacingSameIP(addr, addrFrom, nTimePenalty);
+            }
+        }
+        return added;
+    }
     return addrman.Add(vAddr, addrFrom, nTimePenalty);
 }
 
@@ -3105,10 +3286,7 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn
     }
 
     m_deserializer = MakeUnique<V1TransportDeserializer>(V1TransportDeserializer(Params(), GetId(), SER_NETWORK, INIT_PROTO_VERSION));
-    // Defcoin dual-magic: start outbound with the preferred magic; replies are
-    // re-synced to the peer's actual magic once its first header is read.
-    m_serializer = MakeUnique<V1TransportSerializer>(V1TransportSerializer(
-        use_legacy_outbound_magic ? Params().MessageStartLegacyMagic() : Params().MessageStartDefcoinMagic()));
+    m_serializer = MakeUnique<V1TransportSerializer>(V1TransportSerializer(use_legacy_outbound_magic ? Params().MessageStartLegacyMagic() : Params().MessageStartDefcoinMagic()));
     if (use_legacy_outbound_magic) {
         LogPrint(BCLog::NET, "Using legacy Litecoin-compatible message start for outbound peer=%d\n", GetId());
     }

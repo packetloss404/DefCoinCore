@@ -136,7 +136,7 @@ static RPCHelpMan getrawtransaction()
                                          {RPCResult::Type::STR, "type", "The type, eg 'pubkeyhash'"},
                                          {RPCResult::Type::ARR, "addresses", "",
                                          {
-                                             {RPCResult::Type::STR, "address", "litecoin address"},
+                                             {RPCResult::Type::STR, "address", "defcoin address"},
                                          }},
                                      }},
                                  }},
@@ -395,7 +395,7 @@ static RPCHelpMan createrawtransaction()
                         {
                             {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
                                 {
-                                    {"address", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "A key-value pair. The key (string) is the litecoin address, the value (float or string) is the amount in " + CURRENCY_UNIT},
+                                    {"address", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "A key-value pair. The key (string) is the defcoin address, the value (float or string) is the amount in " + CURRENCY_UNIT},
                                 },
                                 },
                             {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
@@ -495,7 +495,7 @@ static RPCHelpMan decoderawtransaction()
                                     {RPCResult::Type::STR, "type", "The type, eg 'pubkeyhash'"},
                                     {RPCResult::Type::ARR, "addresses", "",
                                     {
-                                        {RPCResult::Type::STR, "address", "litecoin address"},
+                                        {RPCResult::Type::STR, "address", "defcoin address"},
                                     }},
                                 }},
                             }},
@@ -552,7 +552,7 @@ static RPCHelpMan decodescript()
                         {RPCResult::Type::NUM, "reqSigs", "The required signatures"},
                         {RPCResult::Type::ARR, "addresses", "",
                         {
-                            {RPCResult::Type::STR, "address", "litecoin address"},
+                            {RPCResult::Type::STR, "address", "defcoin address"},
                         }},
                         {RPCResult::Type::STR, "p2sh", "address of P2SH script wrapping this redeem script (not returned if the script is already a P2SH)"},
                         {RPCResult::Type::OBJ, "segwit", "Result of a witness script public key wrapping this redeem script (not returned if the script is a P2SH or witness)",
@@ -858,7 +858,9 @@ static RPCHelpMan sendrawtransaction()
                                              CFeeRate(AmountFromValue(request.params[1]));
 
     int64_t virtual_size = GetVirtualTransactionSize(*tx);
-    CAmount max_raw_tx_fee = max_raw_tx_fee_rate.GetTotalFee(virtual_size, tx->mweb_tx.GetMWEBWeight());
+    CAmount max_raw_tx_fee = max_raw_tx_fee_rate.GetFeePerK() == 0
+        ? 0
+        : max_raw_tx_fee_rate.GetTotalFee(virtual_size, tx->mweb_tx.GetMWEBWeight());
 
     std::string err_string;
     AssertLockNotHeld(cs_main);
@@ -939,7 +941,9 @@ static RPCHelpMan testmempoolaccept()
 
     CTxMemPool& mempool = EnsureMemPool(request.context);
     int64_t virtual_size = GetVirtualTransactionSize(*tx);
-    CAmount max_raw_tx_fee = max_raw_tx_fee_rate.GetTotalFee(virtual_size, tx->mweb_tx.GetMWEBWeight());
+    CAmount max_raw_tx_fee = max_raw_tx_fee_rate.GetFeePerK() == 0
+        ? 0
+        : max_raw_tx_fee_rate.GetTotalFee(virtual_size, tx->mweb_tx.GetMWEBWeight());
 
     UniValue result(UniValue::VARR);
     UniValue result_0(UniValue::VOBJ);
@@ -991,7 +995,7 @@ static RPCHelpMan testmempoolaccept()
 static RPCHelpMan decodepsbt()
 {
     return RPCHelpMan{"decodepsbt",
-                "\nReturn a JSON object representing the serialized, base64-encoded partially signed Litecoin transaction.\n",
+                "\nReturn a JSON object representing the serialized, base64-encoded partially signed Defcoin transaction.\n",
                 {
                     {"psbt", RPCArg::Type::STR, RPCArg::Optional::NO, "The PSBT base64 string"},
                 },
@@ -1022,7 +1026,7 @@ static RPCHelpMan decodepsbt()
                                         {RPCResult::Type::STR, "asm", "The asm"},
                                         {RPCResult::Type::STR_HEX, "hex", "The hex"},
                                         {RPCResult::Type::STR, "type", "The type, eg 'pubkeyhash'"},
-                                        {RPCResult::Type::STR, "address"," Litecoin address if there is one"},
+                                        {RPCResult::Type::STR, "address"," Defcoin address if there is one"},
                                     }},
                                 }},
                                 {RPCResult::Type::OBJ_DYN, "partial_signatures", /* optional */ true, "",
@@ -1302,7 +1306,7 @@ static RPCHelpMan decodepsbt()
 static RPCHelpMan combinepsbt()
 {
     return RPCHelpMan{"combinepsbt",
-                "\nCombine multiple partially signed Litecoin transactions into one transaction.\n"
+                "\nCombine multiple partially signed Defcoin transactions into one transaction.\n"
                 "Implements the Combiner role.\n",
                 {
                     {"txs", RPCArg::Type::ARR, RPCArg::Optional::NO, "The base64 strings of partially signed transactions",
@@ -1432,7 +1436,7 @@ static RPCHelpMan createpsbt()
                         {
                             {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
                                 {
-                                    {"address", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "A key-value pair. The key (string) is the litecoin address, the value (float or string) is the amount in " + CURRENCY_UNIT},
+                                    {"address", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "A key-value pair. The key (string) is the defcoin address, the value (float or string) is the amount in " + CURRENCY_UNIT},
                                 },
                                 },
                             {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",

@@ -252,6 +252,9 @@ protected:
     //! Delete an entry. It must not be in tried, and have refcount 0.
     void Delete(int nId) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
+    //! Remove an entry from either the "new" or "tried" table.
+    bool Remove_(int nId) EXCLUSIVE_LOCKS_REQUIRED(cs);
+
     //! Clear a position in a "new" table. This is the only place where entries are actually deleted.
     void ClearNew(int nUBucket, int nUBucketPos) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
@@ -260,6 +263,9 @@ protected:
 
     //! Add an entry to the "new" table.
     bool Add_(const CAddress &addr, const CNetAddr& source, int64_t nTimePenalty) EXCLUSIVE_LOCKS_REQUIRED(cs);
+
+    //! Add an entry if needed and mark it good after a successful connection.
+    bool AddAndMarkGood_(const CAddress& addr) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     //! Mark an entry as attempted to connect.
     void Attempt_(const CService &addr, bool fCountFailure, int64_t nTime) EXCLUSIVE_LOCKS_REQUIRED(cs);
@@ -621,6 +627,26 @@ public:
         return fRet;
     }
 
+    //! Add a single address, replacing a same-IP entry when the caller prefers the new port.
+    bool AddReplacingSameIP(const CAddress& addr, const CNetAddr& source, int64_t nTimePenalty = 0)
+    {
+        LOCK(cs);
+        bool fRet = false;
+        Check();
+        int nId;
+        CAddrInfo* pinfo = Find(addr, &nId);
+        if (pinfo && pinfo->GetPort() != addr.GetPort()) {
+            LogPrint(BCLog::ADDRMAN, "Replacing same-IP addrman entry %s with %s\n", pinfo->ToStringIPPort(), addr.ToStringIPPort());
+            Remove_(nId);
+        }
+        fRet |= Add_(addr, source, nTimePenalty);
+        Check();
+        if (fRet) {
+            LogPrint(BCLog::ADDRMAN, "Added %s from %s after same-IP replacement check: %i tried, %i new\n", addr.ToStringIPPort(), source.ToString(), nTried, nNew);
+        }
+        return fRet;
+    }
+
     //! Add multiple addresses.
     bool Add(const std::vector<CAddress> &vAddr, const CNetAddr& source, int64_t nTimePenalty = 0)
     {
@@ -643,6 +669,38 @@ public:
         Check();
         Good_(addr, test_before_evict, nTime);
         Check();
+    }
+
+    //! Add an entry if needed and mark it accessible after a successful connection.
+    bool AddAndMarkGood(const CAddress& addr)
+    {
+        LOCK(cs);
+        Check();
+        const bool ret = AddAndMarkGood_(addr);
+        Check();
+        if (ret) {
+            LogPrint(BCLog::ADDRMAN, "Added and marked good %s: %i tried, %i new\n", addr.ToStringIPPort(), nTried, nNew);
+        }
+        return ret;
+    }
+
+    //! Add and mark good, replacing a same-IP entry when the caller prefers the new port.
+    bool AddAndMarkGoodReplacingSameIP(const CAddress& addr)
+    {
+        LOCK(cs);
+        Check();
+        int nId;
+        CAddrInfo* pinfo = Find(addr, &nId);
+        if (pinfo && pinfo->GetPort() != addr.GetPort()) {
+            LogPrint(BCLog::ADDRMAN, "Replacing same-IP addrman entry %s with successful peer %s\n", pinfo->ToStringIPPort(), addr.ToStringIPPort());
+            Remove_(nId);
+        }
+        const bool ret = AddAndMarkGood_(addr);
+        Check();
+        if (ret) {
+            LogPrint(BCLog::ADDRMAN, "Added and marked good %s after same-IP replacement check: %i tried, %i new\n", addr.ToStringIPPort(), nTried, nNew);
+        }
+        return ret;
     }
 
     //! Mark an entry as connection attempted to.

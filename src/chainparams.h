@@ -25,8 +25,8 @@ struct CCheckpointData {
     MapCheckpoints mapCheckpoints;
 
     int GetHeight() const {
-        const auto& final_checkpoint = mapCheckpoints.rbegin();
-        return final_checkpoint->first /* height */;
+        if (mapCheckpoints.empty()) return 0;
+        return mapCheckpoints.rbegin()->first;
     }
 };
 
@@ -64,10 +64,9 @@ public:
     };
 
     const Consensus::Params& GetConsensus() const { return consensus; }
+    // Keep MessageStart() stable for inherited Litecoin-derived storage paths.
+    // Live P2P dual-magic code should use the explicit magic accessors below.
     const CMessageHeader::MessageStartChars& MessageStart() const { return pchMessageStart; }
-    // Defcoin dual-magic migration: prefer MessageStartDefcoinMagic() for live
-    // P2P, fall back to MessageStartLegacyMagic() (Litecoin-compatible) during
-    // the migration window. MessageStart() is kept stable for inherited paths.
     const CMessageHeader::MessageStartChars& MessageStartDefcoinMagic() const { return pchMessageStartDefcoinMagic; }
     const CMessageHeader::MessageStartChars& MessageStartLegacyMagic() const { return pchMessageStartLegacyMagic; }
     int GetDefaultPort() const { return nDefaultPort; }
@@ -95,7 +94,7 @@ public:
     const std::vector<unsigned char>& Base58Prefix(Base58Type type) const { return base58Prefixes[type]; }
     const std::string& Bech32HRP() const { return bech32_hrp; }
     const std::string& MWEB_HRP() const { return mweb_hrp; }
-    const std::vector<SeedSpec6>& FixedSeeds() const { return vFixedSeeds; }
+    const std::vector<uint8_t>& FixedSeeds() const { return vFixedSeeds; }
     const CCheckpointData& Checkpoints() const { return checkpointData; }
     const ChainTxData& TxData() const { return chainTxData; }
 protected:
@@ -115,7 +114,7 @@ protected:
     std::string mweb_hrp;
     std::string strNetworkID;
     CBlock genesis;
-    std::vector<SeedSpec6> vFixedSeeds;
+    std::vector<uint8_t> vFixedSeeds;
     bool fDefaultConsistencyChecks;
     bool fRequireStandard;
     bool m_is_test_chain;

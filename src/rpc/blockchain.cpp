@@ -81,6 +81,15 @@ ChainstateManager& EnsureChainman(const util::Ref& context)
     return *node.chainman;
 }
 
+CConnman& EnsureConnman(const util::Ref& context)
+{
+    NodeContext& node = EnsureNodeContext(context);
+    if (!node.connman) {
+        throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
+    }
+    return *node.connman;
+}
+
 /* Calculate the difficulty for a given block index.
  */
 double GetDifficulty(const CBlockIndex* blockindex)
@@ -593,7 +602,8 @@ static void entryToJSON(const CTxMemPool& pool, UniValue& info, const CTxMemPool
         mweb_weight.pushKV("descendant", (int)e.GetMWEBWeightWithDescendants());
         mweb_info.pushKV("weight", mweb_weight);
 
-        mweb_info.pushKV("fee", ValueFromAmount(tx.mweb_tx.GetFee()));
+        const auto mweb_fee = tx.mweb_tx.GetFee();
+        mweb_info.pushKV("fee", mweb_fee ? ValueFromAmount(*mweb_fee) : UniValue(UniValue::VNULL));
         mweb_info.pushKV("lock_height", tx.mweb_tx.GetLockHeight());
 
         // Pegins
@@ -1273,8 +1283,8 @@ static RPCHelpMan gettxout()
                                 {RPCResult::Type::STR_HEX, "hex", ""},
                                 {RPCResult::Type::NUM, "reqSigs", "Number of required signatures"},
                                 {RPCResult::Type::STR_HEX, "type", "The type, eg pubkeyhash"},
-                                {RPCResult::Type::ARR, "addresses", "array of litecoin addresses",
-                                    {{RPCResult::Type::STR, "address", "litecoin address"}}},
+                                {RPCResult::Type::ARR, "addresses", "array of defcoin addresses",
+                                    {{RPCResult::Type::STR, "address", "defcoin address"}}},
                             }},
                         {RPCResult::Type::BOOL, "coinbase", "Coinbase or not"},
                     }},

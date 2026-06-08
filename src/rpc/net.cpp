@@ -125,8 +125,10 @@ static RPCHelpMan getpeerinfo()
                             {RPCResult::Type::NUM, "pingwait", "ping wait (if non-zero)"},
                             {RPCResult::Type::NUM, "version", "The peer version, such as 70001"},
                             {RPCResult::Type::STR, "subver", "The string version"},
-                            {RPCResult::Type::STR, "magic", "Actual P2P message-start bytes selected from this peer's header (Defcoin or legacy), or \"pending\""},
                             {RPCResult::Type::BOOL, "inbound", "Inbound (true) or Outbound (false)"},
+                            {RPCResult::Type::STR, "p2p_magic", "Actual P2P message-start bytes selected from this peer's packet header"},
+                            {RPCResult::Type::BOOL, "p2p_magic_legacy", "Whether this peer is using the legacy Litecoin-compatible Defcoin message-start bytes"},
+                            {RPCResult::Type::STR, "magic", "Actual P2P message-start bytes selected from this peer's packet header"},
                             {RPCResult::Type::BOOL, "addnode", "Whether connection was due to addnode/-connect or if it was an automatic/inbound connection\n"
                                                                "(DEPRECATED, returned only if the config option -deprecatedrpc=getpeerinfo_addnode is passed)"},
                             {RPCResult::Type::STR, "connection_type", "Type of connection: \n" + Join(CONNECTION_TYPE_DOC, ",\n") + ".\n"
@@ -140,6 +142,8 @@ static RPCHelpMan getpeerinfo()
                             {
                                 {RPCResult::Type::NUM, "n", "The heights of blocks we're currently asking from this peer"},
                             }},
+                            {RPCResult::Type::NUM, "addr_processed", "The total number of addr/addrv2 relay entries processed from this peer, excluding those dropped due to rate limiting. This is not a unique-node count and may include duplicate or stale relay entries."},
+                            {RPCResult::Type::NUM, "addr_rate_limited", "The total number of addresses dropped due to rate limiting"},
                             {RPCResult::Type::BOOL, "whitelisted", /* optional */ true, "Whether the peer is whitelisted with default permissions\n"
                                                                                         "(DEPRECATED, returned only if config option -deprecatedrpc=whitelisted is passed)"},
                             {RPCResult::Type::ARR, "permissions", "Any special permissions that have been granted to this peer",
@@ -219,8 +223,10 @@ static RPCHelpMan getpeerinfo()
         // corrupting or modifying the JSON output by putting special characters in
         // their ver message.
         obj.pushKV("subver", stats.cleanSubVer);
-        obj.pushKV("magic", stats.m_message_start_selected ? stats.m_message_start_hex : "pending");
         obj.pushKV("inbound", stats.fInbound);
+        obj.pushKV("p2p_magic", stats.m_message_start_hex);
+        obj.pushKV("p2p_magic_legacy", stats.m_using_legacy_magic);
+        obj.pushKV("magic", stats.m_message_start_selected ? stats.m_message_start_hex : "pending");
         if (IsDeprecatedRPCEnabled("getpeerinfo_addnode")) {
             // addnode is deprecated in v0.21 for removal in v0.22
             obj.pushKV("addnode", stats.m_manual_connection);
@@ -238,6 +244,8 @@ static RPCHelpMan getpeerinfo()
                 heights.push_back(height);
             }
             obj.pushKV("inflight", heights);
+            obj.pushKV("addr_processed", statestats.m_addr_processed);
+            obj.pushKV("addr_rate_limited", statestats.m_addr_rate_limited);
         }
         if (IsDeprecatedRPCEnabled("whitelisted")) {
             // whitelisted is deprecated in v0.21 for removal in v0.22
@@ -328,6 +336,61 @@ static RPCHelpMan addnode()
     };
 }
 
+static RPCHelpMan addconnection()
+{
+    return RPCHelpMan{"addconnection",
+        "\nOpen an outbound connection to a specified node. This RPC is for testing only.\n",
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The IP address and port to attempt connecting to."},
+            {"connection_type", RPCArg::Type::STR, RPCArg::Optional::NO, "Type of connection to open (\"outbound-full-relay\", \"block-relay-only\", \"addr-fetch\" or \"feeler\")."},
+        },
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                { RPCResult::Type::STR, "address", "Address of newly added connection." },
+                { RPCResult::Type::STR, "connection_type", "Type of connection opened." },
+            }},
+        RPCExamples{
+            HelpExampleCli("addconnection", "\"192.168.0.6:9333\" \"outbound-full-relay\"")
+            + HelpExampleRpc("addconnection", "\"192.168.0.6:9333\" \"outbound-full-relay\"")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    if (Params().NetworkIDString() != CBaseChainParams::REGTEST) {
+        throw std::runtime_error("addconnection is for regression testing (-regtest mode) only.");
+    }
+
+    const std::string address = request.params[0].get_str();
+    const std::string conn_type_in{TrimString(request.params[1].get_str())};
+    ConnectionType conn_type{};
+    if (conn_type_in == "outbound-full-relay") {
+        conn_type = ConnectionType::OUTBOUND_FULL_RELAY;
+    } else if (conn_type_in == "block-relay-only") {
+        conn_type = ConnectionType::BLOCK_RELAY;
+    } else if (conn_type_in == "addr-fetch") {
+        conn_type = ConnectionType::ADDR_FETCH;
+    } else if (conn_type_in == "feeler") {
+        conn_type = ConnectionType::FEELER;
+    } else {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, self.ToString());
+    }
+
+    CConnman& connman = EnsureConnman(request.context);
+
+    const bool success = connman.AddConnection(address, conn_type);
+    if (!success) {
+        throw JSONRPCError(RPC_CLIENT_NODE_CAPACITY_REACHED, "Error: Already at capacity for specified connection type.");
+    }
+
+    UniValue info(UniValue::VOBJ);
+    info.pushKV("address", address);
+    info.pushKV("connection_type", conn_type_in);
+
+    return info;
+},
+    };
+}
+
 static RPCHelpMan disconnectnode()
 {
     return RPCHelpMan{"disconnectnode",
@@ -340,9 +403,9 @@ static RPCHelpMan disconnectnode()
                 },
                 RPCResult{RPCResult::Type::NONE, "", ""},
                 RPCExamples{
-                    HelpExampleCli("disconnectnode", "\"192.168.0.6:8333\"")
+                    HelpExampleCli("disconnectnode", "\"192.168.0.6:9333\"")
             + HelpExampleCli("disconnectnode", "\"\" 1")
-            + HelpExampleRpc("disconnectnode", "\"192.168.0.6:8333\"")
+            + HelpExampleRpc("disconnectnode", "\"192.168.0.6:9333\"")
             + HelpExampleRpc("disconnectnode", "\"\", 1")
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
@@ -394,7 +457,7 @@ static RPCHelpMan getaddednodeinfo()
                             {
                                 {RPCResult::Type::OBJ, "", "",
                                 {
-                                    {RPCResult::Type::STR, "address", "The litecoin server IP and port we're connected to"},
+                                    {RPCResult::Type::STR, "address", "The defcoin server IP and port we're connected to"},
                                     {RPCResult::Type::STR, "connected", "connection, inbound or outbound"},
                                 }},
                             }},
@@ -789,6 +852,43 @@ static RPCHelpMan setnetworkactive()
     };
 }
 
+static RPCHelpMan getonlydefcoinuseragents()
+{
+    return RPCHelpMan{"getonlydefcoinuseragents",
+                "\nReturns whether non-Defcoin-prefixed peer user agents are rejected.\n",
+                {},
+                RPCResult{RPCResult::Type::BOOL, "", "true when only Defcoin-prefixed peers are accepted"},
+                RPCExamples{
+                    HelpExampleCli("getonlydefcoinuseragents", "")
+            + HelpExampleRpc("getonlydefcoinuseragents", "")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    return GetOnlyDefcoinUserAgents();
+},
+    };
+}
+
+static RPCHelpMan setonlydefcoinuseragents()
+{
+    return RPCHelpMan{"setonlydefcoinuseragents",
+                "\nEnable or disable the Defcoin peer user-agent prefix filter.\n",
+                {
+                    {"enabled", RPCArg::Type::BOOL, RPCArg::Optional::NO, "true to accept only peers whose user agent begins with /Defcoin, false to accept all peers"},
+                },
+                RPCResult{RPCResult::Type::BOOL, "", "The filter state after applying the request"},
+                RPCExamples{
+                    HelpExampleCli("setonlydefcoinuseragents", "true")
+            + HelpExampleRpc("setonlydefcoinuseragents", "true")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    SetOnlyDefcoinUserAgents(request.params[0].get_bool());
+    return GetOnlyDefcoinUserAgents();
+},
+    };
+}
+
 static RPCHelpMan getnodeaddresses()
 {
     return RPCHelpMan{"getnodeaddresses",
@@ -858,8 +958,8 @@ static RPCHelpMan addpeeraddress()
             },
         },
         RPCExamples{
-            HelpExampleCli("addpeeraddress", "\"1.2.3.4\" 8333")
-    + HelpExampleRpc("addpeeraddress", "\"1.2.3.4\", 8333")
+            HelpExampleCli("addpeeraddress", "\"1.2.3.4\" 9333")
+    + HelpExampleRpc("addpeeraddress", "\"1.2.3.4\", 9333")
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -911,7 +1011,10 @@ static const CRPCCommand commands[] =
     { "network",            "listbanned",             &listbanned,             {} },
     { "network",            "clearbanned",            &clearbanned,            {} },
     { "network",            "setnetworkactive",       &setnetworkactive,       {"state"} },
+    { "network",            "getonlydefcoinuseragents", &getonlydefcoinuseragents, {} },
+    { "network",            "setonlydefcoinuseragents", &setonlydefcoinuseragents, {"enabled"} },
     { "network",            "getnodeaddresses",       &getnodeaddresses,       {"count"} },
+    { "hidden",             "addconnection",          &addconnection,          {"address", "connection_type"} },
     { "hidden",             "addpeeraddress",         &addpeeraddress,         {"address", "port"} },
 };
 // clang-format on

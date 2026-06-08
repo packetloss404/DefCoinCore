@@ -36,6 +36,10 @@
 #include <algorithm>
 #include <cassert>
 #include <fcntl.h>
+#ifdef MAC_OSX
+#include <pwd.h>
+#include <unistd.h>
+#endif
 #include <sched.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -631,7 +635,7 @@ static std::string FormatException(const std::exception* pex, const char* pszThr
     char pszModule[MAX_PATH] = "";
     GetModuleFileNameA(nullptr, pszModule, sizeof(pszModule));
 #else
-    const char* pszModule = "litecoin";
+    const char* pszModule = "defcoin";
 #endif
     if (pex)
         return strprintf(
@@ -650,24 +654,33 @@ void PrintExceptionContinue(const std::exception* pex, const char* pszThread)
 
 fs::path GetDefaultDataDir()
 {
-    // Windows: C:\Users\Username\AppData\Roaming\Bitcoin
-    // macOS: ~/Library/Application Support/Bitcoin
-    // Unix-like: ~/.bitcoin
+    // Windows: C:\Users\Username\AppData\Roaming\Defcoin
+    // macOS: ~/Library/Application Support/Defcoin
+    // Unix-like: ~/.defcoin
 #ifdef WIN32
     // Windows
     return GetSpecialFolderPath(CSIDL_APPDATA) / "Defcoin";
 #else
     fs::path pathRet;
+#ifdef MAC_OSX
+    if (const struct passwd* pwd = getpwuid(getuid())) {
+        pathRet = fs::path(pwd->pw_dir);
+    }
+    if (pathRet.empty()) {
+        char* pszHome = getenv("HOME");
+        if (pszHome == nullptr || strlen(pszHome) == 0) {
+            pathRet = fs::path("/");
+        } else {
+            pathRet = fs::path(pszHome);
+        }
+    }
+    return pathRet / "Library/Application Support/Defcoin";
+#else
     char* pszHome = getenv("HOME");
     if (pszHome == nullptr || strlen(pszHome) == 0)
         pathRet = fs::path("/");
     else
         pathRet = fs::path(pszHome);
-#ifdef MAC_OSX
-    // macOS
-    return pathRet / "Library/Application Support/Defcoin";
-#else
-    // Unix-like
     return pathRet / ".defcoin";
 #endif
 #endif
@@ -1189,9 +1202,6 @@ void runCommand(const std::string& strCommand)
 #endif
 
 #ifdef HAVE_BOOST_PROCESS
-// Boost.Process v2 API is significantly different from v1
-// For now, disable this feature on Windows until proper v2 implementation
-#if !defined(_WIN32) || defined(BOOST_PROCESS_V1_COMPAT)
 UniValue RunCommandParseJSON(const std::string& str_command, const std::string& str_std_in)
 {
     namespace bp = boost::process;
@@ -1226,13 +1236,6 @@ UniValue RunCommandParseJSON(const std::string& str_command, const std::string& 
 
     return result_json;
 }
-#else
-// Boost.Process v2 not yet implemented
-UniValue RunCommandParseJSON(const std::string& str_command, const std::string& str_std_in)
-{
-    throw std::runtime_error("RunCommandParseJSON is not available on Windows with Boost.Process v2");
-}
-#endif
 #endif // HAVE_BOOST_PROCESS
 
 void SetupEnvironment()

@@ -84,6 +84,7 @@ FUZZ_TARGETS = \
   test/fuzz/parse_script \
   test/fuzz/parse_univalue \
   test/fuzz/partial_merkle_tree_deserialize \
+  test/fuzz/partially_downloaded_block.cpp \
   test/fuzz/partially_signed_transaction_deserialize \
   test/fuzz/policy_estimator \
   test/fuzz/policy_estimator_io \
@@ -332,6 +333,7 @@ BITCOIN_TESTS += \
   libmw/test/tests/mmr/Test_MMR.cpp \
   libmw/test/tests/mmr/Test_MMRUtil.cpp \
   libmw/test/tests/mmr/Test_PruneList.cpp \
+  libmw/test/tests/mmr/Test_Segment.cpp \
   libmw/test/tests/models/block/Test_Block.cpp \
   libmw/test/tests/models/block/Test_Header.cpp \
   libmw/test/tests/models/crypto/Test_BigInteger.cpp \
@@ -351,7 +353,7 @@ BITCOIN_TESTS += \
   libmw/test/tests/wallet/Test_Keychain.cpp
 
 test_test_litecoin_SOURCES = $(BITCOIN_TEST_SUITE) $(BITCOIN_TESTS) $(JSON_TEST_FILES) $(RAW_TEST_FILES)
-test_test_litecoin_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(TESTDEFS) $(EVENT_CFLAGS) $(LIBMW_CPPFLAGS) -Ilibmw/test/framework/include
+test_test_litecoin_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(TESTDEFS) $(EVENT_CFLAGS) $(LIBMW_CPPFLAGS) -I$(srcdir)/libmw/test/framework/include
 test_test_litecoin_LDADD = $(LIBTEST_UTIL)
 if ENABLE_WALLET
 test_test_litecoin_LDADD += $(LIBBITCOIN_WALLET)
@@ -1348,7 +1350,7 @@ if ENABLE_BENCH
 	$(BENCH_BINARY) > /dev/null
 endif
 endif
-	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C secp256k1 check
+	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C secp256k1-zkp check
 if EMBEDDED_UNIVALUE
 	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C univalue check
 endif

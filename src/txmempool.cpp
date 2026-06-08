@@ -754,21 +754,25 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const
         uint64_t nSizeCheck = it->GetTxSize();
         CAmount nFeesCheck = it->GetModifiedFee();
         int64_t nSigOpCheck = it->GetSigOpCost();
+        uint64_t nMWEBWeightCheck = it->GetMWEBWeight();
 
         for (txiter ancestorIt : setAncestors) {
             nSizeCheck += ancestorIt->GetTxSize();
             nFeesCheck += ancestorIt->GetModifiedFee();
             nSigOpCheck += ancestorIt->GetSigOpCost();
+            nMWEBWeightCheck += ancestorIt->GetMWEBWeight();
         }
 
         assert(it->GetCountWithAncestors() == nCountCheck);
         assert(it->GetSizeWithAncestors() == nSizeCheck);
         assert(it->GetSigOpCostWithAncestors() == nSigOpCheck);
         assert(it->GetModFeesWithAncestors() == nFeesCheck);
+        assert(it->GetMWEBWeightWithAncestors() == nMWEBWeightCheck);
 
         // Check children against mapNextTx
         CTxMemPoolEntry::Children setChildrenCheck;
         uint64_t child_sizes = 0;
+        uint64_t child_mweb_weights = 0;
         for (const CTxOutput& output : it->GetTx().GetOutputs()) {
             auto iter = mapNextTx.find(output.GetIndex());
             if (iter != mapNextTx.end()) {
@@ -776,6 +780,7 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const
                 assert(childit != mapTx.end()); // mapNextTx points to in-mempool transactions
                 if (setChildrenCheck.insert(*childit).second) {
                     child_sizes += childit->GetTxSize();
+                    child_mweb_weights += childit->GetMWEBWeight();
                 }
             }
         }
@@ -784,6 +789,7 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const
         // Also check to make sure size is greater than sum with immediate children.
         // just a sanity check, not definitive that this calc is correct...
         assert(it->GetSizeWithDescendants() >= child_sizes + it->GetTxSize());
+        assert(it->GetMWEBWeightWithDescendants() >= child_mweb_weights + it->GetMWEBWeight());
 
         if (fDependsWait)
             waitingOnDependants.push_back(&(*it));
@@ -818,11 +824,16 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const
 
 bool CTxMemPool::CompareDepthAndScore(const uint256& hasha, const uint256& hashb, bool wtxid)
 {
+     /* Return `true` if hasha should be considered sooner than hashb. Namely when:
+     *   a is not in the mempool, but b is
+     *   both are in the mempool and a has fewer ancestors than b
+     *   both are in the mempool and a has a higher score than b
+     */
     LOCK(cs);
-    indexed_transaction_set::const_iterator i = wtxid ? get_iter_from_wtxid(hasha) : mapTx.find(hasha);
-    if (i == mapTx.end()) return false;
     indexed_transaction_set::const_iterator j = wtxid ? get_iter_from_wtxid(hashb) : mapTx.find(hashb);
-    if (j == mapTx.end()) return true;
+    if (j == mapTx.end()) return false;
+    indexed_transaction_set::const_iterator i = wtxid ? get_iter_from_wtxid(hasha) : mapTx.find(hasha);
+    if (i == mapTx.end()) return true;
     uint64_t counta = i->GetCountWithAncestors();
     uint64_t countb = j->GetCountWithAncestors();
     if (counta == countb) {

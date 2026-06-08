@@ -29,7 +29,7 @@ Leaf PMMRCache::GetLeaf(const LeafIndex& leafIdx) const
     }
 
     const uint64_t cacheIdx = leafIdx.Get() - m_firstLeaf.Get();
-    if (cacheIdx > m_leaves.size()) {
+    if (cacheIdx >= m_leaves.size()) {
         throw std::out_of_range("Attempting to access non-existent leaf");
     }
 
@@ -75,7 +75,7 @@ void PMMRCache::Rewind(const uint64_t numLeaves)
             m_leaves.erase(iter, m_leaves.end());
         }
 
-        const uint64_t numNodes = GetNextLeafIdx().GetPosition() - m_firstLeaf.GetPosition();
+        const uint64_t numNodes = GetNumNodes() - m_firstLeaf.GetPosition();
         if (m_nodes.size() > numNodes) {
             m_nodes.erase(m_nodes.begin() + numNodes, m_nodes.end());
         }

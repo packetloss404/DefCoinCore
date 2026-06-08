@@ -130,6 +130,65 @@ void CAddrMan::Delete(int nId)
     nNew--;
 }
 
+bool CAddrMan::Remove_(int nId)
+{
+    const auto it = mapInfo.find(nId);
+    if (it == mapInfo.end()) {
+        return false;
+    }
+
+    CAddrInfo& info = it->second;
+
+    if (info.fInTried) {
+        bool removed_tried_ref = false;
+        const int tried_bucket = info.GetTriedBucket(nKey, m_asmap);
+        const int tried_bucket_pos = info.GetBucketPosition(nKey, false, tried_bucket);
+        if (vvTried[tried_bucket][tried_bucket_pos] == nId) {
+            vvTried[tried_bucket][tried_bucket_pos] = -1;
+            removed_tried_ref = true;
+        } else {
+            for (int bucket = 0; bucket < ADDRMAN_TRIED_BUCKET_COUNT && !removed_tried_ref; ++bucket) {
+                for (int pos = 0; pos < ADDRMAN_BUCKET_SIZE; ++pos) {
+                    if (vvTried[bucket][pos] == nId) {
+                        vvTried[bucket][pos] = -1;
+                        removed_tried_ref = true;
+                        break;
+                    }
+                }
+            }
+        }
+        assert(removed_tried_ref);
+        nTried--;
+        info.fInTried = false;
+        assert(info.nRefCount == 0);
+        m_tried_collisions.erase(nId);
+
+        SwapRandom(info.nRandomPos, vRandom.size() - 1);
+        vRandom.pop_back();
+        mapAddr.erase(info);
+        mapInfo.erase(nId);
+        return true;
+    }
+
+    std::vector<std::pair<int, int>> new_refs;
+    for (int bucket = 0; bucket < ADDRMAN_NEW_BUCKET_COUNT; ++bucket) {
+        for (int pos = 0; pos < ADDRMAN_BUCKET_SIZE; ++pos) {
+            if (vvNew[bucket][pos] == nId) {
+                new_refs.emplace_back(bucket, pos);
+            }
+        }
+    }
+    for (const auto& ref : new_refs) {
+        ClearNew(ref.first, ref.second);
+    }
+    m_tried_collisions.erase(nId);
+    if (mapInfo.count(nId) != 0) {
+        assert(mapInfo[nId].nRefCount == 0);
+        Delete(nId);
+    }
+    return true;
+}
+
 void CAddrMan::ClearNew(int nUBucket, int nUBucketPos)
 {
     // if there is an entry in the specified bucket, delete it.
@@ -330,6 +389,38 @@ bool CAddrMan::Add_(const CAddress& addr, const CNetAddr& source, int64_t nTimeP
         }
     }
     return fNew;
+}
+
+bool CAddrMan::AddAndMarkGood_(const CAddress& addr)
+{
+    if (!addr.IsRoutable()) return false;
+
+    int nId;
+    CAddrInfo* pinfo = Find(addr, &nId);
+    if (!pinfo) {
+        pinfo = Create(addr, addr, &nId);
+        pinfo->nTime = addr.nTime ? addr.nTime : GetAdjustedTime();
+        pinfo->nServices = addr.nServices;
+        ++nNew;
+    } else {
+        if (addr.nTime && (!pinfo->nTime || pinfo->nTime < addr.nTime)) {
+            pinfo->nTime = addr.nTime;
+        }
+        pinfo->nServices = ServiceFlags(pinfo->nServices | addr.nServices);
+    }
+
+    if (!pinfo->fInTried && pinfo->nRefCount == 0) {
+        const int nUBucket = pinfo->GetNewBucket(nKey, addr, m_asmap);
+        const int nUBucketPos = pinfo->GetBucketPosition(nKey, true, nUBucket);
+        ClearNew(nUBucket, nUBucketPos);
+        pinfo->nRefCount = 1;
+        vvNew[nUBucket][nUBucketPos] = nId;
+    }
+
+    // This peer just completed a successful handshake, so it is useful enough
+    // to move into tried even when the tried bucket slot is occupied.
+    Good_(addr, /* test_before_evict */ false, GetAdjustedTime());
+    return true;
 }
 
 void CAddrMan::Attempt_(const CService& addr, bool fCountFailure, int64_t nTime)

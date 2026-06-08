@@ -23,20 +23,22 @@ class TxValidationState;
 extern RecursiveMutex cs_main;
 extern RecursiveMutex g_cs_orphans;
 
+void SetOnlyDefcoinUserAgents(bool enabled);
+bool GetOnlyDefcoinUserAgents();
+void SetAllowLanNodeDiscovery(bool enabled);
+bool GetAllowLanNodeDiscovery();
+
+static const bool DEFAULT_DEFCOIN_USER_AGENT_FILTER = true;
+static const bool DEFAULT_ALLOW_LAN_NODE_DISCOVERY = true;
+
 /** Default for -maxorphantx, maximum number of orphan transactions kept in memory */
 static const unsigned int DEFAULT_MAX_ORPHAN_TRANSACTIONS = 100;
 /** Default number of orphan+recently-replaced txn to keep around for block reconstruction */
 static const unsigned int DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN = 100;
 static const bool DEFAULT_PEERBLOOMFILTERS = false;
-static const bool DEFAULT_PEERBLOCKFILTERS = false;
+static const bool DEFAULT_PEERBLOCKFILTERS = true;
 /** Threshold for marking a node to be discouraged, e.g. disconnected and added to the discouragement filter. */
 static const int DISCOURAGEMENT_THRESHOLD{100};
-
-/** Defcoin peer hygiene: only keep peers whose advertised user agent starts
- *  with /Defcoin (drops Litecoin-family peers that share the legacy magic). */
-static const bool DEFAULT_DEFCOIN_USER_AGENT_FILTER = true;
-void SetOnlyDefcoinUserAgents(bool enabled);
-bool GetOnlyDefcoinUserAgents();
 
 class PeerManager final : public CValidationInterface, public NetEventsInterface {
 public:
@@ -156,6 +158,8 @@ struct CNodeStateStats {
     int nSyncHeight = -1;
     int nCommonHeight = -1;
     std::vector<int> vHeightInFlight;
+    uint64_t m_addr_processed = 0;
+    uint64_t m_addr_rate_limited = 0;
 };
 
 /** Get statistics from node state */

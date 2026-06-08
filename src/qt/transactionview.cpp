@@ -458,12 +458,11 @@ void TransactionView::rebroadcastTx()
     QString hashQStr = selection.at(0).data(TransactionTableModel::TxHashRole).toString();
     hash.SetHex(hashQStr.toStdString());
 
-    // Rebroadcast the wallet transaction
-    std::string err_string;
-    if (model->wallet().rebroadcastTransaction(hash, err_string)) {
+    // Rebroadcast the wallet transaction (Nu interface: bool rebroadcastTransaction(txid))
+    if (model->wallet().rebroadcastTransaction(hash)) {
         Q_EMIT message(tr("Rebroadcast transaction"), tr("Transaction successfully rebroadcast to the network."), CClientUIInterface::MSG_INFORMATION);
     } else {
-        Q_EMIT message(tr("Rebroadcast transaction"), tr("Failed to rebroadcast transaction: %1").arg(QString::fromStdString(err_string)), CClientUIInterface::MSG_ERROR);
+        Q_EMIT message(tr("Rebroadcast transaction"), tr("Failed to rebroadcast transaction."), CClientUIInterface::MSG_ERROR);
     }
 }
 
