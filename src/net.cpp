@@ -79,6 +79,63 @@ static constexpr int DNSSEEDS_DELAY_PEER_THRESHOLD = 1000; // "many" vs "few" pe
 // We add a random period time (0 to 1 seconds) to feeler connections to prevent synchronization.
 #define FEELER_SLEEP_WINDOW 1
 
+// Defcoin dual-magic migration state ------------------------------------------
+// Whether to accept the legacy Litecoin-compatible P2P magic in addition to the
+// Defcoin-specific magic. Toggled at startup via -acceptlegacymagic.
+static std::atomic_bool g_accept_legacy_message_start{DEFAULT_ACCEPT_LEGACY_MAGIC};
+// Round-robins occasional legacy-magic outbound attempts during migration.
+static std::atomic<uint64_t> g_legacy_outbound_probe_counter{0};
+
+void SetAcceptLegacyMagic(bool enabled)
+{
+    g_accept_legacy_message_start.store(enabled, std::memory_order_relaxed);
+}
+
+bool GetAcceptLegacyMagic()
+{
+    return g_accept_legacy_message_start.load(std::memory_order_relaxed);
+}
+
+static bool IsDefcoinMainnet()
+{
+    return Params().NetworkIDString() == CBaseChainParams::MAIN;
+}
+
+static std::string MessageStartHex(const CMessageHeader::MessageStartChars& message_start)
+{
+    return strprintf("%02x%02x%02x%02x",
+                     static_cast<unsigned int>(message_start[0]),
+                     static_cast<unsigned int>(message_start[1]),
+                     static_cast<unsigned int>(message_start[2]),
+                     static_cast<unsigned int>(message_start[3]));
+}
+
+// Decide whether a new outbound connection should open using legacy magic.
+// We prefer the Defcoin magic, but during migration many reachable peers are
+// still legacy-only, so for likely-legacy endpoints we probe legacy half the
+// time. ADDR_FETCH (seed) connections always use legacy for widest reach.
+static bool UseLegacyOutboundMagic(ConnectionType conn_type, const CAddress& addr, const std::string& addr_name)
+{
+    if (!IsDefcoinMainnet() || !GetAcceptLegacyMagic()) {
+        return false;
+    }
+    if (conn_type == ConnectionType::ADDR_FETCH) {
+        return true;
+    }
+    if (conn_type != ConnectionType::OUTBOUND_FULL_RELAY && conn_type != ConnectionType::MANUAL) {
+        return false;
+    }
+    const bool likely_legacy_endpoint = addr.GetPort() == Params().GetDefaultPort()
+        || addr_name.find(':') == std::string::npos
+        || addr_name.find(":1337") != std::string::npos;
+    if (!likely_legacy_endpoint) {
+        return false;
+    }
+    const uint64_t probe = g_legacy_outbound_probe_counter.fetch_add(1, std::memory_order_relaxed);
+    return (probe % 2) == 0;
+}
+// -----------------------------------------------------------------------------
+
 // MSG_NOSIGNAL is not available on some platforms, if it doesn't exist define it as 0
 #if !defined(MSG_NOSIGNAL)
 #define MSG_NOSIGNAL 0
@@ -482,7 +539,8 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
     NodeId id = GetNewNodeId();
     uint64_t nonce = GetDeterministicRandomizer(RANDOMIZER_ID_LOCALHOSTNONCE).Write(id).Finalize();
     CAddress addr_bind = GetBindAddress(hSocket);
-    CNode* pnode = new CNode(id, nLocalServices, GetBestHeight(), hSocket, addrConnect, CalculateKeyedNetGroup(addrConnect), nonce, addr_bind, pszDest ? pszDest : "", conn_type);
+    const bool use_legacy_outbound_magic = UseLegacyOutboundMagic(conn_type, addrConnect, pszDest ? pszDest : "");
+    CNode* pnode = new CNode(id, nLocalServices, GetBestHeight(), hSocket, addrConnect, CalculateKeyedNetGroup(addrConnect), nonce, addr_bind, pszDest ? pszDest : "", conn_type, /*inbound_onion=*/false, use_legacy_outbound_magic);
     pnode->AddRef();
 
     // We're making a new connection, harvest entropy from the time (and our peer count)
@@ -583,6 +641,12 @@ void CNode::copyStats(CNodeStats &stats, const std::vector<bool> &m_asmap)
     X(nTimeOffset);
     stats.addrName = GetAddrName();
     X(nVersion);
+    // Defcoin dual-magic diagnostics: report the magic selected from this peer.
+    if (m_deserializer) {
+        stats.m_message_start_selected = m_deserializer->MessageStartSelected();
+        stats.m_using_legacy_magic = m_deserializer->UsingLegacyMagic();
+        stats.m_message_start_hex = MessageStartHex(m_deserializer->ActiveMessageStart());
+    }
     {
         LOCK(cs_SubVer);
         X(cleanSubVer);
@@ -658,6 +722,12 @@ bool CNode::ReceiveMsgBytes(const char *pch, unsigned int nBytes, bool& complete
             return false;
         }
 
+        // Defcoin dual-magic: once the peer's magic is locked in by the
+        // deserializer, send our replies with the same magic.
+        if (m_deserializer->MessageStartSelected()) {
+            m_serializer->SetMessageStart(m_deserializer->ActiveMessageStart());
+        }
+
         pch += handled;
         nBytes -= handled;
 
@@ -690,6 +760,39 @@ bool CNode::ReceiveMsgBytes(const char *pch, unsigned int nBytes, bool& complete
     return true;
 }
 
+bool V1TransportDeserializer::MatchMessageStart(const CMessageHeader::MessageStartChars& message_start) const
+{
+    return memcmp(hdr.pchMessageStart, message_start, CMessageHeader::MESSAGE_START_SIZE) == 0;
+}
+
+bool V1TransportDeserializer::TrySelectMessageStart()
+{
+    if (m_message_start_selected) {
+        // Magic already locked for this peer; every later header must match it.
+        return MatchMessageStart(m_active_message_start);
+    }
+
+    const bool matches_defcoin = MatchMessageStart(m_chain_params.MessageStartDefcoinMagic());
+    const bool matches_legacy = GetAcceptLegacyMagic() && MatchMessageStart(m_chain_params.MessageStartLegacyMagic());
+    if (!matches_defcoin && !matches_legacy) {
+        return false;
+    }
+
+    // Prefer the Defcoin-specific magic when both would match.
+    const CMessageHeader::MessageStartChars& selected = matches_defcoin
+        ? m_chain_params.MessageStartDefcoinMagic()
+        : m_chain_params.MessageStartLegacyMagic();
+    for (unsigned int i = 0; i < CMessageHeader::MESSAGE_START_SIZE; ++i) {
+        m_active_message_start[i] = selected[i];
+    }
+    m_message_start_selected = true;
+    m_using_legacy_magic = !matches_defcoin;
+    if (m_using_legacy_magic) {
+        LogPrint(BCLog::NET, "Using legacy Litecoin-compatible message start for peer=%d\n", m_node_id);
+    }
+    return true;
+}
+
 int V1TransportDeserializer::readHeader(const char *pch, unsigned int nBytes)
 {
     // copy data to temporary parsing buffer
@@ -712,8 +815,10 @@ int V1TransportDeserializer::readHeader(const char *pch, unsigned int nBytes)
         return -1;
     }
 
-    // Check start string, network magic
-    if (memcmp(hdr.pchMessageStart, m_chain_params.MessageStart(), CMessageHeader::MESSAGE_START_SIZE) != 0) {
+    // Check start string, network magic. Defcoin accepts its own magic and,
+    // during the migration window, the legacy Litecoin-compatible magic. The
+    // chosen magic is locked per peer on the first valid header.
+    if (!TrySelectMessageStart()) {
         LogPrint(BCLog::NET, "HEADER ERROR - MESSAGESTART (%s, %u bytes), received %s, peer=%d\n", hdr.GetCommand(), hdr.nMessageSize, HexStr(hdr.pchMessageStart), m_node_id);
         return -1;
     }
@@ -796,8 +901,8 @@ void V1TransportSerializer::prepareForTransport(CSerializedNetMsg& msg, std::vec
     // create dbl-sha256 checksum
     uint256 hash = Hash(msg.data);
 
-    // create header
-    CMessageHeader hdr(Params().MessageStart(), msg.m_type.c_str(), msg.data.size());
+    // create header (Defcoin dual-magic: use this peer's selected message-start)
+    CMessageHeader hdr(m_message_start, msg.m_type.c_str(), msg.data.size());
     memcpy(hdr.pchChecksum, hash.begin(), CMessageHeader::CHECKSUM_SIZE);
 
     // serialize header
@@ -2953,7 +3058,7 @@ int CConnman::GetBestHeight() const
 
 unsigned int CConnman::GetReceiveFloodSize() const { return nReceiveFloodSize; }
 
-CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn, SOCKET hSocketIn, const CAddress& addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress& addrBindIn, const std::string& addrNameIn, ConnectionType conn_type_in, bool inbound_onion)
+CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn, SOCKET hSocketIn, const CAddress& addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress& addrBindIn, const std::string& addrNameIn, ConnectionType conn_type_in, bool inbound_onion, bool use_legacy_outbound_magic)
     : nTimeConnected(GetSystemTimeInSeconds()),
     addr(addrIn),
     addrBind(addrBindIn),
@@ -2990,7 +3095,13 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn
     }
 
     m_deserializer = MakeUnique<V1TransportDeserializer>(V1TransportDeserializer(Params(), GetId(), SER_NETWORK, INIT_PROTO_VERSION));
-    m_serializer = MakeUnique<V1TransportSerializer>(V1TransportSerializer());
+    // Defcoin dual-magic: start outbound with the preferred magic; replies are
+    // re-synced to the peer's actual magic once its first header is read.
+    m_serializer = MakeUnique<V1TransportSerializer>(V1TransportSerializer(
+        use_legacy_outbound_magic ? Params().MessageStartLegacyMagic() : Params().MessageStartDefcoinMagic()));
+    if (use_legacy_outbound_magic) {
+        LogPrint(BCLog::NET, "Using legacy Litecoin-compatible message start for outbound peer=%d\n", GetId());
+    }
 }
 
 CNode::~CNode()

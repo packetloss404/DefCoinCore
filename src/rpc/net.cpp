@@ -125,6 +125,7 @@ static RPCHelpMan getpeerinfo()
                             {RPCResult::Type::NUM, "pingwait", "ping wait (if non-zero)"},
                             {RPCResult::Type::NUM, "version", "The peer version, such as 70001"},
                             {RPCResult::Type::STR, "subver", "The string version"},
+                            {RPCResult::Type::STR, "magic", "Actual P2P message-start bytes selected from this peer's header (Defcoin or legacy), or \"pending\""},
                             {RPCResult::Type::BOOL, "inbound", "Inbound (true) or Outbound (false)"},
                             {RPCResult::Type::BOOL, "addnode", "Whether connection was due to addnode/-connect or if it was an automatic/inbound connection\n"
                                                                "(DEPRECATED, returned only if the config option -deprecatedrpc=getpeerinfo_addnode is passed)"},
@@ -218,6 +219,7 @@ static RPCHelpMan getpeerinfo()
         // corrupting or modifying the JSON output by putting special characters in
         // their ver message.
         obj.pushKV("subver", stats.cleanSubVer);
+        obj.pushKV("magic", stats.m_message_start_selected ? stats.m_message_start_hex : "pending");
         obj.pushKV("inbound", stats.fInbound);
         if (IsDeprecatedRPCEnabled("getpeerinfo_addnode")) {
             // addnode is deprecated in v0.21 for removal in v0.22

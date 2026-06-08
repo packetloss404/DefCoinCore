@@ -118,6 +118,16 @@ public:
         pchMessageStart[1] = 0xc0;
         pchMessageStart[2] = 0xb6;
         pchMessageStart[3] = 0xdb;
+        // Legacy magic (shared with Litecoin) accepted during migration.
+        pchMessageStartLegacyMagic[0] = 0xfb;
+        pchMessageStartLegacyMagic[1] = 0xc0;
+        pchMessageStartLegacyMagic[2] = 0xb6;
+        pchMessageStartLegacyMagic[3] = 0xdb;
+        // Defcoin-specific magic, preferred for live P2P (network isolation).
+        pchMessageStartDefcoinMagic[0] = 0xde;
+        pchMessageStartDefcoinMagic[1] = 0xfc;
+        pchMessageStartDefcoinMagic[2] = 0x01;
+        pchMessageStartDefcoinMagic[3] = 0x4e;
         nDefaultPort = 1337; // DEFCOIN
         nPruneAfterHeight = 100000;
         m_assumed_blockchain_size = 2; // DEFCOIN: smaller blockchain
@@ -232,6 +242,14 @@ public:
         pchMessageStart[1] = 0xc1;
         pchMessageStart[2] = 0xb7;
         pchMessageStart[3] = 0xdc;
+        pchMessageStartLegacyMagic[0] = 0xfc;
+        pchMessageStartLegacyMagic[1] = 0xc1;
+        pchMessageStartLegacyMagic[2] = 0xb7;
+        pchMessageStartLegacyMagic[3] = 0xdc;
+        pchMessageStartDefcoinMagic[0] = 0xdf;
+        pchMessageStartDefcoinMagic[1] = 0xfd;
+        pchMessageStartDefcoinMagic[2] = 0x02;
+        pchMessageStartDefcoinMagic[3] = 0x4f;
         nDefaultPort = 31337;  // DEFCOIN testnet
         nPruneAfterHeight = 1000;
         m_assumed_blockchain_size = 4;
@@ -330,6 +348,14 @@ public:
         pchMessageStart[1] = 0xbf;
         pchMessageStart[2] = 0xb5;
         pchMessageStart[3] = 0xda;
+        pchMessageStartLegacyMagic[0] = 0xfa;
+        pchMessageStartLegacyMagic[1] = 0xbf;
+        pchMessageStartLegacyMagic[2] = 0xb5;
+        pchMessageStartLegacyMagic[3] = 0xda;
+        pchMessageStartDefcoinMagic[0] = 0xdd;
+        pchMessageStartDefcoinMagic[1] = 0xfb;
+        pchMessageStartDefcoinMagic[2] = 0x00;
+        pchMessageStartDefcoinMagic[3] = 0x4d;
         nDefaultPort = 19444;
         nPruneAfterHeight = 1000;
         m_assumed_blockchain_size = 0;

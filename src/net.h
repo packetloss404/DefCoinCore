@@ -86,6 +86,11 @@ static const bool DEFAULT_BLOCKSONLY = false;
 static const int64_t DEFAULT_PEER_CONNECT_TIMEOUT = 60;
 
 static const bool DEFAULT_FORCEDNSSEED = false;
+/** Defcoin dual-magic migration: accept legacy (Litecoin-compatible) P2P
+ *  message-start bytes in addition to the Defcoin-specific magic. */
+static const bool DEFAULT_ACCEPT_LEGACY_MAGIC = true;
+void SetAcceptLegacyMagic(bool enabled);
+bool GetAcceptLegacyMagic();
 static const size_t DEFAULT_MAXRECEIVEBUFFER = 5 * 1000;
 static const size_t DEFAULT_MAXSENDBUFFER    = 1 * 1000;
 
@@ -700,6 +705,10 @@ public:
     std::string addrName;
     int nVersion;
     std::string cleanSubVer;
+    // Defcoin dual-magic: per-peer selected P2P message-start for diagnostics.
+    bool m_message_start_selected{false};
+    bool m_using_legacy_magic{false};
+    std::string m_message_start_hex;
     bool fInbound;
     bool m_manual_connection;
     int nStartingHeight;
@@ -761,6 +770,12 @@ public:
     virtual int Read(const char *data, unsigned int bytes) = 0;
     // decomposes a message from the context
     virtual Optional<CNetMessage> GetMessage(std::chrono::microseconds time, uint32_t& out_err) = 0;
+    // Defcoin dual-magic: whether this peer's P2P message-start has been locked
+    // in yet, whether it is the legacy (Litecoin-compatible) magic, and the
+    // active 4 magic bytes selected from the peer's first header.
+    virtual bool MessageStartSelected() const = 0;
+    virtual bool UsingLegacyMagic() const = 0;
+    virtual const CMessageHeader::MessageStartChars& ActiveMessageStart() const = 0;
     virtual ~TransportDeserializer() {}
 };
 
@@ -778,9 +793,19 @@ private:
     unsigned int nHdrPos;
     unsigned int nDataPos;
 
+    // Defcoin dual-magic state: the magic selected from this peer's first valid
+    // header (defaults to the new Defcoin magic until proven legacy).
+    CMessageHeader::MessageStartChars m_active_message_start;
+    bool m_message_start_selected{false};
+    bool m_using_legacy_magic{false};
+
     const uint256& GetMessageHash() const;
     int readHeader(const char *pch, unsigned int nBytes);
     int readData(const char *pch, unsigned int nBytes);
+    // Returns true if the partially-received header start matches the given magic.
+    bool MatchMessageStart(const CMessageHeader::MessageStartChars& message_start) const;
+    // Picks/locks the peer's magic from the header start; false if neither magic matches.
+    bool TrySelectMessageStart();
 
     void Reset() {
         vRecv.clear();
@@ -800,6 +825,10 @@ public:
           hdrbuf(nTypeIn, nVersionIn),
           vRecv(nTypeIn, nVersionIn)
     {
+        // Default to the new Defcoin magic until a legacy header is observed.
+        for (unsigned int i = 0; i < CMessageHeader::MESSAGE_START_SIZE; ++i) {
+            m_active_message_start[i] = m_chain_params.MessageStartDefcoinMagic()[i];
+        }
         Reset();
     }
 
@@ -820,6 +849,9 @@ public:
         return ret;
     }
     Optional<CNetMessage> GetMessage(std::chrono::microseconds time, uint32_t& out_err_raw_size) override;
+    bool MessageStartSelected() const override { return m_message_start_selected; }
+    bool UsingLegacyMagic() const override { return m_using_legacy_magic; }
+    const CMessageHeader::MessageStartChars& ActiveMessageStart() const override { return m_active_message_start; }
 };
 
 /** The TransportSerializer prepares messages for the network transport
@@ -828,11 +860,27 @@ class TransportSerializer {
 public:
     // prepare message for transport (header construction, error-correction computation, payload encryption, etc.)
     virtual void prepareForTransport(CSerializedNetMsg& msg, std::vector<unsigned char>& header) = 0;
+    // Defcoin dual-magic: set the outbound message-start (no-op for transports
+    // that do not support per-peer magic selection).
+    virtual void SetMessageStart(const CMessageHeader::MessageStartChars& message_start) {}
     virtual ~TransportSerializer() {}
 };
 
 class V1TransportSerializer  : public TransportSerializer {
+private:
+    // Defcoin dual-magic: the magic used for outbound messages on this peer.
+    // Set to the outbound preference at construction, then synced to the peer's
+    // selected magic once known (so replies match the peer).
+    CMessageHeader::MessageStartChars m_message_start;
 public:
+    explicit V1TransportSerializer(const CMessageHeader::MessageStartChars& message_start) {
+        SetMessageStart(message_start);
+    }
+    void SetMessageStart(const CMessageHeader::MessageStartChars& message_start) override {
+        for (unsigned int i = 0; i < CMessageHeader::MESSAGE_START_SIZE; ++i) {
+            m_message_start[i] = message_start[i];
+        }
+    }
     void prepareForTransport(CSerializedNetMsg& msg, std::vector<unsigned char>& header) override;
 };
 
@@ -1056,7 +1104,7 @@ public:
     // Whether a ping is requested.
     std::atomic<bool> fPingQueued{false};
 
-    CNode(NodeId id, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn, SOCKET hSocketIn, const CAddress &addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress &addrBindIn, const std::string &addrNameIn, ConnectionType conn_type_in, bool inbound_onion = false);
+    CNode(NodeId id, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn, SOCKET hSocketIn, const CAddress &addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress &addrBindIn, const std::string &addrNameIn, ConnectionType conn_type_in, bool inbound_onion = false, bool use_legacy_outbound_magic = false);
     ~CNode();
     CNode(const CNode&) = delete;
     CNode& operator=(const CNode&) = delete;

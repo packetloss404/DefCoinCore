@@ -65,6 +65,11 @@ public:
 
     const Consensus::Params& GetConsensus() const { return consensus; }
     const CMessageHeader::MessageStartChars& MessageStart() const { return pchMessageStart; }
+    // Defcoin dual-magic migration: prefer MessageStartDefcoinMagic() for live
+    // P2P, fall back to MessageStartLegacyMagic() (Litecoin-compatible) during
+    // the migration window. MessageStart() is kept stable for inherited paths.
+    const CMessageHeader::MessageStartChars& MessageStartDefcoinMagic() const { return pchMessageStartDefcoinMagic; }
+    const CMessageHeader::MessageStartChars& MessageStartLegacyMagic() const { return pchMessageStartLegacyMagic; }
     int GetDefaultPort() const { return nDefaultPort; }
 
     const CBlock& GenesisBlock() const { return genesis; }
@@ -98,6 +103,8 @@ protected:
 
     Consensus::Params consensus;
     CMessageHeader::MessageStartChars pchMessageStart;
+    CMessageHeader::MessageStartChars pchMessageStartDefcoinMagic;
+    CMessageHeader::MessageStartChars pchMessageStartLegacyMagic;
     int nDefaultPort;
     uint64_t nPruneAfterHeight;
     uint64_t m_assumed_blockchain_size;
