@@ -32,6 +32,12 @@ static const bool DEFAULT_PEERBLOCKFILTERS = false;
 /** Threshold for marking a node to be discouraged, e.g. disconnected and added to the discouragement filter. */
 static const int DISCOURAGEMENT_THRESHOLD{100};
 
+/** Defcoin peer hygiene: only keep peers whose advertised user agent starts
+ *  with /Defcoin (drops Litecoin-family peers that share the legacy magic). */
+static const bool DEFAULT_DEFCOIN_USER_AGENT_FILTER = true;
+void SetOnlyDefcoinUserAgents(bool enabled);
+bool GetOnlyDefcoinUserAgents();
+
 class PeerManager final : public CValidationInterface, public NetEventsInterface {
 public:
     PeerManager(const CChainParams& chainparams, CConnman& connman, BanMan* banman,

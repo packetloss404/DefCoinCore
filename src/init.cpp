@@ -446,6 +446,7 @@ void SetupServerArgs(NodeContext& node)
 
     argsman.AddArg("-addnode=<ip>", "Add a node to connect to and attempt to keep the connection open (see the `addnode` RPC command help for more info). This option can be specified multiple times to add multiple nodes.", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-acceptlegacymagic", strprintf("Temporarily accept legacy Litecoin-compatible Defcoin P2P message-start bytes during the Defcoin magic migration (default: %u)", DEFAULT_ACCEPT_LEGACY_MAGIC), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
+    argsman.AddArg("-onlydefcoinua", strprintf("Only keep peers whose advertised user agent starts with /Defcoin, dropping Litecoin-family peers and their address gossip (default: %u)", DEFAULT_DEFCOIN_USER_AGENT_FILTER), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
     argsman.AddArg("-asmap=<file>", strprintf("Specify asn mapping used for bucketing of the peers (default: %s). Relative paths will be prefixed by the net-specific datadir location.", DEFAULT_ASMAP_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-bantime=<n>", strprintf("Default duration (in seconds) of manually configured bans (default: %u)", DEFAULT_MISBEHAVING_BANTIME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-bind=<addr>[:<port>][=onion]", strprintf("Bind to given address and always listen on it (default: 0.0.0.0). Use [host]:port notation for IPv6. Append =onion to tag any incoming connections to that address and port as incoming Tor connections (default: 127.0.0.1:%u=onion, testnet: 127.0.0.1:%u=onion, signet: 127.0.0.1:%u=onion, regtest: 127.0.0.1:%u=onion)", defaultBaseParams->OnionServiceTargetPort(), testnetBaseParams->OnionServiceTargetPort(), signetBaseParams->OnionServiceTargetPort(), regtestBaseParams->OnionServiceTargetPort()), ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
@@ -1513,6 +1514,8 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     fDiscover = args.GetBoolArg("-discover", true);
     // Defcoin dual-magic migration toggle.
     SetAcceptLegacyMagic(args.GetBoolArg("-acceptlegacymagic", DEFAULT_ACCEPT_LEGACY_MAGIC));
+    // Defcoin peer hygiene: only keep /Defcoin-prefixed peers.
+    SetOnlyDefcoinUserAgents(args.GetBoolArg("-onlydefcoinua", DEFAULT_DEFCOIN_USER_AGENT_FILTER));
     g_relay_txes = !args.GetBoolArg("-blocksonly", DEFAULT_BLOCKSONLY);
 
     for (const std::string& strAddr : args.GetArgs("-externalip")) {

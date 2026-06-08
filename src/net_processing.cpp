@@ -35,6 +35,28 @@
 #include <optional>
 #include <typeinfo>
 
+// Defcoin peer hygiene: drop peers whose user agent is not Defcoin-prefixed.
+static std::atomic_bool g_only_defcoin_user_agents{DEFAULT_DEFCOIN_USER_AGENT_FILTER};
+
+void SetOnlyDefcoinUserAgents(bool enabled)
+{
+    g_only_defcoin_user_agents.store(enabled, std::memory_order_relaxed);
+}
+
+bool GetOnlyDefcoinUserAgents()
+{
+    return g_only_defcoin_user_agents.load(std::memory_order_relaxed);
+}
+
+static bool IsDefcoinPrefixedUserAgent(const std::string& clean_subver)
+{
+    std::string normalized = clean_subver;
+    while (!normalized.empty() && normalized.front() == '/') {
+        normalized.erase(normalized.begin());
+    }
+    return ToLower(normalized).rfind("defcoin", 0) == 0;
+}
+
 /** Expiration time for orphan transactions in seconds */
 static constexpr int64_t ORPHAN_TX_EXPIRE_TIME = 20 * 60;
 /** Minimum time between orphan transactions expire time checks in seconds */
@@ -2440,6 +2462,14 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
             LOCK(pfrom.cs_SubVer);
             pfrom.cleanSubVer = cleanSubVer;
         }
+        // Defcoin peer hygiene: drop peers whose advertised user agent is not
+        // Defcoin-prefixed before they can relay addresses (keeps Litecoin-family
+        // peers, which share the legacy magic, out of addrman and relay).
+        if (GetOnlyDefcoinUserAgents() && !IsDefcoinPrefixedUserAgent(cleanSubVer)) {
+            LogPrint(BCLog::NET, "peer=%d user agent '%s' is not Defcoin-prefixed; disconnecting\n", pfrom.GetId(), cleanSubVer);
+            pfrom.fDisconnect = true;
+            return;
+        }
         pfrom.nStartingHeight = nStartingHeight;
 
         // set nodes not relaying blocks and tx and not serving (parts) of the historical blockchain as "clients"
@@ -2629,6 +2659,15 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
     }
 
     if (msg_type == NetMsgType::ADDR || msg_type == NetMsgType::ADDRV2) {
+        // Defcoin peer hygiene: ignore address gossip from non-Defcoin peers so
+        // Litecoin-family addresses (shared legacy magic) don't pollute addrman.
+        if (GetOnlyDefcoinUserAgents()) {
+            LOCK(pfrom.cs_SubVer);
+            if (!IsDefcoinPrefixedUserAgent(pfrom.cleanSubVer)) {
+                LogPrint(BCLog::NET, "peer=%d user agent '%s' is not Defcoin-prefixed; ignoring %s\n", pfrom.GetId(), pfrom.cleanSubVer, msg_type);
+                return;
+            }
+        }
         int stream_version = vRecv.GetVersion();
         if (msg_type == NetMsgType::ADDRV2) {
             // Add ADDRV2_FORMAT to the version so that the CNetAddr and CAddress
