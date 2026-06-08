@@ -135,6 +135,9 @@ public:
         // release ASAP to avoid it where possible.
         vSeeds.emplace_back("seed.defcoin.io");
         vSeeds.emplace_back("seed2.defcoin.io");
+        vSeeds.emplace_back("seed.defcoin-ng.org");
+        vSeeds.emplace_back("seed.defcoin.mikej.tech");
+        vSeeds.emplace_back("seed.defcoincore.org");
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,30); // DEFCOIN: addresses start with 'D'
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,5);
