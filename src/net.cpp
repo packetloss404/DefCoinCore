@@ -125,14 +125,16 @@ static bool UseLegacyOutboundMagic(ConnectionType conn_type, const CAddress& add
     if (conn_type != ConnectionType::OUTBOUND_FULL_RELAY && conn_type != ConnectionType::MANUAL) {
         return false;
     }
-    const bool likely_legacy_endpoint = addr.GetPort() == Params().GetDefaultPort()
-        || addr_name.find(':') == std::string::npos
-        || addr_name.find(":1337") != std::string::npos;
-    if (!likely_legacy_endpoint) {
-        return false;
-    }
+    // During the migration window prefer legacy magic for outbound: every
+    // Defcoin node (both legacy and Nu, which accepts legacy by default)
+    // understands it, so it maximizes connectivity while the network is still
+    // mostly legacy. Occasionally probe the new Defcoin magic so it keeps
+    // getting exercised. Litecoin isolation is enforced separately by the
+    // /Defcoin user-agent filter, not by the outbound magic choice.
+    (void)addr;
+    (void)addr_name;
     const uint64_t probe = g_legacy_outbound_probe_counter.fetch_add(1, std::memory_order_relaxed);
-    return (probe % 2) == 0;
+    return (probe % 4) != 0; // ~75% legacy, ~25% defc014e probe
 }
 // -----------------------------------------------------------------------------
 
@@ -2002,14 +2004,22 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
         if (interruptNet)
             return;
 
-        // Add seed nodes if DNS seeds are all down (an infrastructure attack?).
-        // Note that we only do this if we started with an empty peers.dat,
-        // (in which case we will query DNS seeds immediately) *and* the DNS
-        // seeds have not returned any results.
-        if (addrman.size() == 0 && (GetTime() - nStart > 60)) {
+        // Add the compiled fixed seeds if we still have no outbound peers after
+        // the grace period. Defcoin's public DNS seeds are thin and sometimes
+        // return only a few stale addresses; upstream only fell back to fixed
+        // seeds on a *completely empty* addrman, so those stale addresses used
+        // to suppress the fallback and leave the node stuck at 0 peers.
+        int num_outbound_peers = 0;
+        {
+            LOCK(cs_vNodes);
+            for (const CNode* pnode : vNodes) {
+                if (pnode->IsFullOutboundConn() || pnode->IsBlockOnlyConn()) ++num_outbound_peers;
+            }
+        }
+        if (num_outbound_peers == 0 && (GetTime() - nStart > 60)) {
             static bool done = false;
             if (!done) {
-                LogPrintf("Adding fixed seed nodes as DNS doesn't seem to be available.\n");
+                LogPrintf("Adding fixed seed nodes (no outbound peers; DNS seeds unavailable or stale).\n");
                 CNetAddr local;
                 local.SetInternal("fixedseeds");
                 addrman.Add(convertSeed6(Params().FixedSeeds()), local);
