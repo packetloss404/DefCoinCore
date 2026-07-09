@@ -37,6 +37,7 @@
 #include <memory>
 #include <set>
 #include <typeinfo>
+#include <vector>
 
 /** Expiration time for orphan transactions in seconds */
 static constexpr int64_t ORPHAN_TX_EXPIRE_TIME = 20 * 60;
@@ -96,6 +97,21 @@ static constexpr std::chrono::microseconds GETDATA_TX_INTERVAL{std::chrono::seco
 static const unsigned int MAX_GETDATA_SZ = 1000;
 /** Number of blocks that can be requested at any given time from a single peer. */
 static const int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16;
+/** Extra out-of-band UDP Fast Sync reservations allowed above the normal TCP window. */
+static const int MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER = 4;
+/** Time for Nu's UDP Fast Sync helper to claim a Core-selected block before TCP fallback. */
+static constexpr int64_t FAST_SYNC_UDP_CLAIM_WINDOW_US = 4 * 1000000;
+/** Time for a claimed UDP Fast Sync block to be delivered before the reservation is released. */
+static constexpr int64_t FAST_SYNC_UDP_TRANSFER_TIMEOUT_US = 30 * 1000000;
+/** Backoff after an unclaimed UDP Fast Sync reservation so normal TCP can make progress. */
+static constexpr int64_t FAST_SYNC_UDP_UNCLAIMED_BACKOFF_US = 30 * 1000000;
+
+static bool DisableCoreTcpBlockRequests()
+{
+    return gArgs.GetBoolArg("-defcoindisablecoretcpblocks", false) ||
+           gArgs.GetBoolArg("-defcoindisablecoreblocksync", false);
+}
+
 /** Timeout in seconds during which a peer must stall block download progress before being disconnected. */
 static const unsigned int BLOCK_STALLING_TIMEOUT = 2;
 /** Number of headers sent in one getheaders result. We rely on the assumption that if a peer sends
@@ -119,6 +135,7 @@ static const unsigned int BLOCK_DOWNLOAD_WINDOW = 1024;
 static const int64_t BLOCK_DOWNLOAD_TIMEOUT_BASE = 1000000;
 /** Additional block download timeout per parallel downloading peer (i.e. 5 min) */
 static const int64_t BLOCK_DOWNLOAD_TIMEOUT_PER_PEER = 500000;
+
 /** Maximum number of headers to announce when relaying blocks with headers message.*/
 static const unsigned int MAX_BLOCKS_TO_ANNOUNCE = 8;
 /** Maximum number of unconnecting headers announcements before DoS score */
@@ -213,6 +230,18 @@ namespace {
             normalized.erase(normalized.begin());
         }
         return ToLower(normalized).rfind("defcoin", 0) == 0;
+    }
+
+    bool IsLocalP2PoolUserAgent(const std::string& clean_subver, const CNetAddr& addr)
+    {
+        if (!addr.IsLocal()) {
+            return false;
+        }
+        std::string normalized = clean_subver;
+        while (!normalized.empty() && normalized.front() == '/') {
+            normalized.erase(normalized.begin());
+        }
+        return ToLower(normalized).rfind("p2pool", 0) == 0;
     }
 
     bool IsLanDiscoveryAddress(const CNetAddr& addr)
@@ -368,10 +397,26 @@ struct CNodeState {
     const CBlockIndex *pindexLastCommonBlock;
     //! The best header we have sent our peer.
     const CBlockIndex *pindexBestHeaderSent;
+    //! Starting height advertised by the peer during VERSION.
+    int nStartingHeight;
     //! Length of current-streak of unconnecting headers announcements
     int nUnconnectingHeaders;
     //! Whether we've started headers synchronization with this peer.
     bool fSyncStarted;
+    //! Whether we've sent a lightweight headers probe to initialize a Fast Sync peer.
+    bool fFastSyncHeaderProbeStarted;
+    //! Core-selected block temporarily reserved for Nu's UDP Fast Sync transport.
+    uint256 hashFastSyncPendingBlock;
+    //! Height of hashFastSyncPendingBlock.
+    int nFastSyncPendingBlockHeight;
+    //! Microsecond deadline for claiming or delivering hashFastSyncPendingBlock.
+    int64_t nFastSyncPendingUntil;
+    //! Whether Nu's UDP helper has claimed the pending reservation.
+    bool fFastSyncPendingClaimed;
+    //! Whether the Nu GUI has verified this peer's UDP Fast Sync return path.
+    bool fFastSyncUdpTransportVerified;
+    //! Microsecond backoff before Core offers another UDP transport window.
+    int64_t nFastSyncDeferBackoffUntil;
     //! When to potentially disconnect peer for stalling headers download
     int64_t nHeadersSyncTimeout;
     //! Since when we're stalling block download progress (in microseconds), or 0.
@@ -478,8 +523,16 @@ struct CNodeState {
         hashLastUnknownBlock.SetNull();
         pindexLastCommonBlock = nullptr;
         pindexBestHeaderSent = nullptr;
+        nStartingHeight = -1;
         nUnconnectingHeaders = 0;
         fSyncStarted = false;
+        fFastSyncHeaderProbeStarted = false;
+        hashFastSyncPendingBlock.SetNull();
+        nFastSyncPendingBlockHeight = -1;
+        nFastSyncPendingUntil = 0;
+        fFastSyncPendingClaimed = false;
+        fFastSyncUdpTransportVerified = false;
+        nFastSyncDeferBackoffUntil = 0;
         nHeadersSyncTimeout = 0;
         nStallingSince = 0;
         nDownloadingSince = 0;
@@ -608,6 +661,14 @@ static void PushNodeVersion(CNode& pnode, CConnman& connman, int64_t nTime)
     }
 }
 
+static void ClearFastSyncPendingBlock(CNodeState& state) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    state.hashFastSyncPendingBlock.SetNull();
+    state.nFastSyncPendingBlockHeight = -1;
+    state.nFastSyncPendingUntil = 0;
+    state.fFastSyncPendingClaimed = false;
+}
+
 // Returns a bool indicating whether we requested this block.
 // Also used if a block was /not/ received and timed out or started with another peer
 static bool MarkBlockAsReceived(const uint256& hash, Optional<NodeId> from_peer) EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
@@ -630,6 +691,9 @@ static bool MarkBlockAsReceived(const uint256& hash, Optional<NodeId> from_peer)
             // First block on the queue was received, update the start download time for the next one
             state->nDownloadingSince = std::max(state->nDownloadingSince, count_microseconds(GetTime<std::chrono::microseconds>()));
         }
+        if (state->hashFastSyncPendingBlock == hash) {
+            ClearFastSyncPendingBlock(*state);
+        }
         state->vBlocksInFlight.erase(itInFlight->second.second);
         state->nBlocksInFlight--;
         state->nStallingSince = 0;
@@ -637,6 +701,27 @@ static bool MarkBlockAsReceived(const uint256& hash, Optional<NodeId> from_peer)
         return true;
     }
     return false;
+}
+
+static bool ExpireFastSyncPendingBlock(NodeId nodeid, CNodeState& state, int64_t now_us, const char* context) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    if (state.hashFastSyncPendingBlock.IsNull() || state.nFastSyncPendingUntil <= 0 || now_us <= state.nFastSyncPendingUntil) {
+        return false;
+    }
+
+    const uint256 hash = state.hashFastSyncPendingBlock;
+    const int height = state.nFastSyncPendingBlockHeight;
+    const bool claimed = state.fFastSyncPendingClaimed;
+    MarkBlockAsReceived(hash, nodeid);
+    state.nFastSyncDeferBackoffUntil = now_us + FAST_SYNC_UDP_UNCLAIMED_BACKOFF_US;
+    LogPrint(BCLog::NET, "Fast Sync released %s UDP reservation for block %s (%d) peer=%d; TCP fallback allowed%s%s\n",
+        claimed ? "claimed but expired" : "unclaimed",
+        hash.ToString(),
+        height,
+        nodeid,
+        context && context[0] ? " from " : "",
+        context && context[0] ? context : "");
+    return true;
 }
 
 // returns false, still setting pit, if the block was already in flight from the same peer
@@ -1017,6 +1102,305 @@ bool GetNodeStateStats(NodeId nodeid, CNodeStateStats &stats) {
     stats.m_addr_processed = peer->m_addr_processed.load();
     stats.m_addr_rate_limited = peer->m_addr_rate_limited.load();
 
+    return true;
+}
+
+static const CBlockIndex* FastSyncHeaderFallbackIndex(const CNodeState& state, int height, std::string& reason) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    if (height <= 0) {
+        reason = "invalid-height";
+        return nullptr;
+    }
+    if (state.nStartingHeight < height) {
+        reason = "peer-best-block-unknown";
+        return nullptr;
+    }
+    if (pindexBestHeader == nullptr || pindexBestHeader->nHeight < height) {
+        reason = "local-header-unavailable";
+        return nullptr;
+    }
+    const CBlockIndex* pindex = pindexBestHeader->GetAncestor(height);
+    if (pindex == nullptr) {
+        reason = "height-not-in-local-header-chain";
+        return nullptr;
+    }
+    if (!pindex->IsValid(BLOCK_VALID_TREE)) {
+        reason = "block-header-not-valid";
+        return nullptr;
+    }
+    return pindex;
+}
+
+bool ReserveFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, int height, uint256& hash_out, std::string& reason)
+{
+    LOCK(cs_main);
+
+    CNodeState* state = State(nodeid);
+    if (state == nullptr) {
+        reason = "peer-not-connected";
+        return false;
+    }
+    if (height <= 0) {
+        reason = "invalid-height";
+        return false;
+    }
+    if (!state->fFastSyncUdpTransportVerified) {
+        reason = "fast-sync-udp-transport-unverified";
+        return false;
+    }
+    const bool using_fast_sync_extra_slot = state->nBlocksInFlight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER;
+    if (state->nBlocksInFlight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER + MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER) {
+        reason = "peer-in-flight-full";
+        return false;
+    }
+
+    ProcessBlockAvailability(nodeid);
+    const bool using_starting_height_fallback = state->pindexBestKnownBlock == nullptr;
+    if (!using_starting_height_fallback && height > state->pindexBestKnownBlock->nHeight) {
+        reason = "peer-does-not-have-height";
+        return false;
+    }
+    const CBlockIndex* pindex = using_starting_height_fallback
+        ? FastSyncHeaderFallbackIndex(*state, height, reason)
+        : state->pindexBestKnownBlock->GetAncestor(height);
+    if (pindex == nullptr) {
+        if (reason.empty()) reason = "height-not-in-peer-chain";
+        return false;
+    }
+    if (!using_starting_height_fallback && !PeerHasHeader(state, pindex)) {
+        reason = "peer-header-not-linked";
+        return false;
+    }
+    if (!pindex->IsValid(BLOCK_VALID_TREE)) {
+        reason = "block-header-not-valid";
+        return false;
+    }
+    if (!state->fHaveWitness && IsWitnessEnabled(pindex->pprev, Params().GetConsensus())) {
+        reason = "peer-lacks-witness";
+        return false;
+    }
+    if (!state->fHaveMWEB && IsMWEBEnabled(pindex->pprev, Params().GetConsensus())) {
+        reason = "peer-lacks-mweb";
+        return false;
+    }
+
+    const uint256 hash = pindex->GetBlockHash();
+    if ((pindex->nStatus & BLOCK_HAVE_DATA) || ::ChainActive().Contains(pindex)) {
+        hash_out = hash;
+        reason = "block-already-have-data";
+        return false;
+    }
+    if (mapBlocksInFlight.count(hash) != 0) {
+        hash_out = hash;
+        reason = "block-already-in-flight";
+        return false;
+    }
+
+    if (!MarkBlockAsInFlight(mempool, nodeid, hash, pindex)) {
+        hash_out = hash;
+        reason = "block-already-in-flight-from-peer";
+        return false;
+    }
+
+    hash_out = hash;
+    reason = "reserved";
+    LogPrint(BCLog::NET, "Fast Sync reserved block %s (%d) for UDP peer=%d%s%s\n",
+        hash.ToString(), height, nodeid, using_fast_sync_extra_slot ? " using extra transport slot" : "",
+        using_starting_height_fallback ? " using starting-height fallback" : "");
+    return true;
+}
+
+bool ReserveNextFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, uint256& hash_out, int& height_out, std::string& reason)
+{
+    LOCK(cs_main);
+
+    height_out = -1;
+    CNodeState* state = State(nodeid);
+    if (state == nullptr) {
+        reason = "peer-not-connected";
+        return false;
+    }
+    if (!state->fFastSyncUdpTransportVerified) {
+        reason = "fast-sync-udp-transport-unverified";
+        return false;
+    }
+
+    const int64_t now_us = count_microseconds(GetTime<std::chrono::microseconds>());
+    ExpireFastSyncPendingBlock(nodeid, *state, now_us, "reserve-next");
+
+    if (!state->hashFastSyncPendingBlock.IsNull()) {
+        hash_out = state->hashFastSyncPendingBlock;
+        height_out = state->nFastSyncPendingBlockHeight;
+        if (state->fFastSyncPendingClaimed) {
+            reason = "fast-sync-reservation-already-claimed";
+            return false;
+        }
+        state->fFastSyncPendingClaimed = true;
+        state->nFastSyncPendingUntil = now_us + FAST_SYNC_UDP_TRANSFER_TIMEOUT_US;
+        reason = "reserved";
+        LogPrint(BCLog::NET, "Fast Sync claimed Core-selected UDP block %s (%d) for peer=%d\n",
+            hash_out.ToString(), height_out, nodeid);
+        return true;
+    }
+
+    const bool using_fast_sync_extra_slot = state->nBlocksInFlight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER;
+    if (state->nBlocksInFlight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER + MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER) {
+        reason = "peer-in-flight-full";
+        return false;
+    }
+
+    // Fast Sync is a transport optimization only. Core still chooses the
+    // peer/block pair so UDP cannot bypass or duplicate normal scheduling.
+    // Mirror the early FindNextBlocksToDownload() gates here so the GUI can
+    // distinguish "still syncing headers" from an actual UDP transport failure.
+    ProcessBlockAvailability(nodeid);
+    const int next_height = ::ChainActive().Height() + 1;
+    bool using_starting_height_fallback = state->pindexBestKnownBlock == nullptr;
+    if (!using_starting_height_fallback && state->pindexBestKnownBlock->nChainWork < ::ChainActive().Tip()->nChainWork) {
+        reason = "peer-chain-not-ahead";
+        return false;
+    }
+    if (!using_starting_height_fallback && state->pindexBestKnownBlock->nChainWork < nMinimumChainWork) {
+        // During a clean bootstrap the peer's best-known block may lag behind
+        // the local best header until header sync reaches minimum chain work.
+        // Fast Sync can still reserve the next block from the local header
+        // chain; the received block is accepted through Core's normal path.
+        using_starting_height_fallback = true;
+    }
+
+    std::vector<const CBlockIndex*> blocks_to_download;
+    if (using_starting_height_fallback) {
+        const int peer_tip = state->nStartingHeight;
+        const int header_tip = pindexBestHeader != nullptr ? pindexBestHeader->nHeight : -1;
+        const int max_height = std::min(
+            std::min(peer_tip, header_tip),
+            next_height + MAX_BLOCKS_IN_TRANSIT_PER_PEER + MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER + 32);
+        std::string fallback_reason;
+        for (int height = next_height; height <= max_height; ++height) {
+            fallback_reason.clear();
+            const CBlockIndex* candidate = FastSyncHeaderFallbackIndex(*state, height, fallback_reason);
+            if (candidate == nullptr) {
+                if (reason.empty()) reason = fallback_reason;
+                break;
+            }
+            const uint256 candidate_hash = candidate->GetBlockHash();
+            if ((candidate->nStatus & BLOCK_HAVE_DATA) ||
+                ::ChainActive().Contains(candidate) ||
+                mapBlocksInFlight.count(candidate_hash) != 0) {
+                continue;
+            }
+            blocks_to_download.push_back(candidate);
+            break;
+        }
+        if (blocks_to_download.empty() && reason.empty()) {
+            reason = fallback_reason.empty() ? "no-downloadable-block-in-window" : fallback_reason;
+        }
+    } else {
+        NodeId staller = -1;
+        FindNextBlocksToDownload(
+            nodeid,
+            MAX_BLOCKS_IN_TRANSIT_PER_PEER + MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER + 32,
+            blocks_to_download,
+            staller,
+            Params().GetConsensus());
+        std::vector<const CBlockIndex*> filtered_blocks;
+        for (const CBlockIndex* candidate : blocks_to_download) {
+            if (candidate == nullptr) continue;
+            const uint256 candidate_hash = candidate->GetBlockHash();
+            if ((candidate->nStatus & BLOCK_HAVE_DATA) ||
+                ::ChainActive().Contains(candidate) ||
+                mapBlocksInFlight.count(candidate_hash) != 0) {
+                continue;
+            }
+            filtered_blocks.push_back(candidate);
+            break;
+        }
+        blocks_to_download.swap(filtered_blocks);
+        if (blocks_to_download.empty()) {
+            if (staller != -1) {
+                reason = "waiting-for-block-window";
+            } else {
+                reason = "no-downloadable-block-in-window";
+            }
+        }
+    }
+    if (blocks_to_download.empty()) {
+        return false;
+    }
+
+    const CBlockIndex* pindex = blocks_to_download.front();
+    if (pindex == nullptr) {
+        reason = "no-downloadable-block";
+        return false;
+    }
+    if (!pindex->IsValid(BLOCK_VALID_TREE)) {
+        reason = "block-header-not-valid";
+        return false;
+    }
+
+    if ((pindex->nStatus & BLOCK_HAVE_DATA) || ::ChainActive().Contains(pindex)) {
+        hash_out = pindex->GetBlockHash();
+        height_out = pindex->nHeight;
+        reason = "block-already-have-data";
+        return false;
+    }
+    const uint256 hash = pindex->GetBlockHash();
+    if (mapBlocksInFlight.count(hash) != 0) {
+        hash_out = hash;
+        height_out = pindex->nHeight;
+        reason = "block-already-in-flight";
+        return false;
+    }
+
+    const uint256 reserve_hash = pindex->GetBlockHash();
+    if (!MarkBlockAsInFlight(mempool, nodeid, reserve_hash, pindex)) {
+        hash_out = reserve_hash;
+        height_out = pindex->nHeight;
+        reason = "block-already-in-flight-from-peer";
+        return false;
+    }
+
+    hash_out = reserve_hash;
+    height_out = pindex->nHeight;
+    reason = "reserved";
+    LogPrint(BCLog::NET, "Fast Sync reserved next Core-selected block %s (%d) for UDP peer=%d%s%s\n",
+        reserve_hash.ToString(), height_out, nodeid, using_fast_sync_extra_slot ? " using extra transport slot" : "",
+        using_starting_height_fallback ? " using starting-height fallback" : "");
+    return true;
+}
+
+bool ReleaseFastSyncBlockInFlight(NodeId nodeid, const uint256& hash)
+{
+    LOCK(cs_main);
+    const bool released = MarkBlockAsReceived(hash, nodeid);
+    if (released) {
+        LogPrint(BCLog::NET, "Fast Sync released block %s from UDP peer=%d\n", hash.ToString(), nodeid);
+    }
+    return released;
+}
+
+bool SetFastSyncPeerTransportVerified(NodeId nodeid, bool verified, std::string& reason)
+{
+    LOCK(cs_main);
+
+    CNodeState* state = State(nodeid);
+    if (state == nullptr) {
+        reason = "peer-not-connected";
+        return false;
+    }
+
+    state->fFastSyncUdpTransportVerified = verified;
+    if (!verified) {
+        if (!state->hashFastSyncPendingBlock.IsNull()) {
+            MarkBlockAsReceived(state->hashFastSyncPendingBlock, nodeid);
+        }
+        state->nFastSyncDeferBackoffUntil =
+            count_microseconds(GetTime<std::chrono::microseconds>()) + FAST_SYNC_UDP_UNCLAIMED_BACKOFF_US;
+    }
+
+    reason = verified ? "transport-verified" : "transport-unverified";
+    LogPrint(BCLog::NET, "Fast Sync UDP transport %s for peer=%d\n",
+        verified ? "verified" : "unverified", nodeid);
     return true;
 }
 
@@ -1752,7 +2136,9 @@ void static ProcessGetBlockData(CNode& pfrom, const CChainParams& chainparams, c
                 nSendFlags |= fPeerWantsMWEB ? 0 : SERIALIZE_NO_MWEB;
 
                 if (CanDirectFetch(consensusParams) && pindex->nHeight >= ::ChainActive().Height() - MAX_CMPCTBLOCK_DEPTH) {
-                    if ((fPeerWantsWitness || !fWitnessesPresentInARecentCompactBlock) && (fPeerWantsMWEB || !fMWEBPresentInARecentCompactBlock) && a_recent_compact_block && a_recent_compact_block->header.GetHash() == pindex->GetBlockHash()) {
+                    if ((fPeerWantsWitness || !fWitnessesPresentInARecentCompactBlock) &&
+                        (fPeerWantsMWEB || !fMWEBPresentInARecentCompactBlock) &&
+                        a_recent_compact_block && a_recent_compact_block->header.GetHash() == pindex->GetBlockHash()) {
                         connman.PushMessage(&pfrom, msgMaker.Make(nSendFlags, NetMsgType::CMPCTBLOCK, *a_recent_compact_block));
                     } else {
                         CBlockHeaderAndShortTxIDs cmpctblock(*pblock, fPeerWantsWitness);
@@ -2234,7 +2620,7 @@ void PeerManager::ProcessHeadersMessage(CNode& pfrom, const std::vector<CBlockHe
             m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexLast), uint256()));
         }
 
-        bool fCanDirectFetch = CanDirectFetch(m_chainparams.GetConsensus());
+        bool fCanDirectFetch = CanDirectFetch(m_chainparams.GetConsensus()) && !DisableCoreTcpBlockRequests();
         // If this set of headers is valid and ends in a block with at least as
         // much work as our tip, download as much as possible.
         if (fCanDirectFetch && pindexLast->IsValid(BLOCK_VALID_TREE) && ::ChainActive().Tip()->nChainWork <= pindexLast->nChainWork) {
@@ -2691,7 +3077,9 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
             std::string strSubVer;
             vRecv >> LIMITED_STRING(strSubVer, MAX_SUBVERSION_LENGTH);
             cleanSubVer = SanitizeString(strSubVer);
-            if (GetOnlyDefcoinUserAgents() && !IsDefcoinPrefixedUserAgent(cleanSubVer)) {
+            if (GetOnlyDefcoinUserAgents()
+                && !IsDefcoinPrefixedUserAgent(cleanSubVer)
+                && !IsLocalP2PoolUserAgent(cleanSubVer, pfrom.addr)) {
                 LogPrintf("peer=%d user agent '%s' is not Defcoin-prefixed on %s connection; disconnecting before address relay\n", pfrom.GetId(), cleanSubVer, pfrom.ConnectionTypeAsString());
                 if (!pfrom.IsInboundConn()) {
                     m_connman.SetTryNewOutboundPeer(true);
@@ -2751,6 +3139,13 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
             pfrom.cleanSubVer = cleanSubVer;
         }
         pfrom.nStartingHeight = nStartingHeight;
+        {
+            LOCK(cs_main);
+            CNodeState* state = State(pfrom.GetId());
+            if (state != nullptr) {
+                state->nStartingHeight = nStartingHeight;
+            }
+        }
 
         // set nodes not relaying blocks and tx and not serving (parts) of the historical blockchain as "clients"
         pfrom.fClient = (!(nServices & NODE_NETWORK) && !(nServices & NODE_NETWORK_LIMITED));
@@ -2954,7 +3349,8 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
     if (msg_type == NetMsgType::ADDR || msg_type == NetMsgType::ADDRV2) {
         if (GetOnlyDefcoinUserAgents()) {
             LOCK(pfrom.cs_SubVer);
-            if (!IsDefcoinPrefixedUserAgent(pfrom.cleanSubVer)) {
+            if (!IsDefcoinPrefixedUserAgent(pfrom.cleanSubVer)
+                && !IsLocalP2PoolUserAgent(pfrom.cleanSubVer, pfrom.addr)) {
                 LogPrintf("peer=%d user agent '%s' is not Defcoin-prefixed; ignoring %s addresses\n",
                           pfrom.GetId(), pfrom.cleanSubVer, SanitizeString(msg_type));
                 pfrom.fDisconnect = true;
@@ -3125,12 +3521,7 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
         peer->m_addr_rate_limited += num_rate_limit;
         LogPrint(BCLog::NET, "Received addr: %u addresses (%u processed, %u rate-limited) from peer=%d\n",
                  vAddr.size(), num_proc, num_rate_limit, pfrom.GetId());
-        LogPrint(BCLog::ADDRMAN,
-                 "Address relay accounting from peer=%d via %s: received=%u unique_in_message=%u duplicates_in_message=%u "
-                 "raw_preferred_port=%u raw_non_preferred_port=%u processed=%u processed_preferred_port=%u processed_non_preferred_port=%u "
-                 "reachable_batch=%u reachable_preferred_port=%u reachable_non_preferred_port=%u unreachable_counted=%u "
-                 "rate_limited=%u non_defcoin_port_skipped=%u lan_private_skipped=%u unusable_services_skipped=%u "
-                 "banned_or_discouraged_skipped=%u sample=[%s]\n",
+        LogPrint(BCLog::ADDRMAN, "Address relay accounting from peer=%d via %s: received=%u unique_in_message=%u duplicates_in_message=%u raw_preferred_port=%u raw_non_preferred_port=%u processed=%u processed_preferred_port=%u processed_non_preferred_port=%u reachable_batch=%u reachable_preferred_port=%u reachable_non_preferred_port=%u unreachable_counted=%u rate_limited=%u non_defcoin_port_skipped=%u lan_private_skipped=%u unusable_services_skipped=%u banned_or_discouraged_skipped=%u sample=[%s]\n",
                  pfrom.GetId(), SanitizeString(msg_type), vAddr.size(), unique_addr_entries.size(),
                  vAddr.size() >= unique_addr_entries.size() ? vAddr.size() - unique_addr_entries.size() : 0,
                  num_raw_preferred_port, num_raw_non_preferred_port, num_proc, num_proc_preferred_port, num_proc_non_preferred_port,
@@ -3757,8 +4148,11 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
 
         std::map<uint256, std::pair<NodeId, std::list<QueuedBlock>::iterator> >::iterator blockInFlightIt = mapBlocksInFlight.find(pindex->GetBlockHash());
         bool fAlreadyInFlight = blockInFlightIt != mapBlocksInFlight.end();
+        const bool disable_core_tcp_blocks = DisableCoreTcpBlockRequests();
 
         if (pindex->nStatus & BLOCK_HAVE_DATA) // Nothing to do here
+            return;
+        if (disable_core_tcp_blocks)
             return;
 
         if (pindex->nChainWork <= ::ChainActive().Tip()->nChainWork || // We know something better
@@ -3766,6 +4160,7 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
             if (fAlreadyInFlight) {
                 // We requested this block for some reason, but our mempool will probably be useless
                 // so we just grab the block via normal getdata
+                if (disable_core_tcp_blocks) return;
                 std::vector<CInv> vInv(1);
                 vInv[0] = CInv(MSG_BLOCK | GetFetchFlags(pfrom), cmpctblock.header.GetHash());
                 m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::GETDATA, vInv));
@@ -3813,6 +4208,7 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
                     return;
                 } else if (status == READ_STATUS_FAILED) {
                     // Duplicate txindexes, the block is now in-flight, so just request it
+                    if (disable_core_tcp_blocks) return;
                     std::vector<CInv> vInv(1);
                     vInv[0] = CInv(MSG_BLOCK | GetFetchFlags(pfrom), cmpctblock.header.GetHash());
                     m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::GETDATA, vInv));
@@ -3856,6 +4252,7 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
             if (fAlreadyInFlight) {
                 // We requested this block, but its far into the future, so our
                 // mempool will probably be useless - request the block normally
+                if (disable_core_tcp_blocks) return;
                 std::vector<CInv> vInv(1);
                 vInv[0] = CInv(MSG_BLOCK | GetFetchFlags(pfrom), cmpctblock.header.GetHash());
                 m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::GETDATA, vInv));
@@ -3947,6 +4344,7 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
                 return;
             } else if (status == READ_STATUS_FAILED) {
                 // Might have collided, fall back to getdata now :(
+                if (DisableCoreTcpBlockRequests()) return;
                 std::vector<CInv> invs;
                 invs.push_back(CInv(MSG_BLOCK | GetFetchFlags(pfrom), resp.blockhash));
                 m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::GETDATA, invs));
@@ -4708,6 +5106,18 @@ bool PeerManager::SendMessages(CNode* pto)
                 m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexStart), uint256()));
             }
         }
+        if (!state.fFastSyncHeaderProbeStarted && state.pindexBestKnownBlock == nullptr &&
+            !pto->fClient && !fImporting && !fReindex &&
+            (pto->nServices.load() & NODE_DEFCOIN_FASTSYNC) && pindexBestHeader != nullptr) {
+            state.fFastSyncHeaderProbeStarted = true;
+            const CBlockIndex* pindexStart = pindexBestHeader;
+            if (pindexStart->pprev) {
+                pindexStart = pindexStart->pprev;
+            }
+            LogPrint(BCLog::NET, "fastsync getheaders probe (%d) to peer=%d (startheight:%d)\n",
+                pindexStart->nHeight, pto->GetId(), pto->nStartingHeight);
+            m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexStart), uint256()));
+        }
 
         //
         // Try sending block announcements via headers
@@ -5076,11 +5486,47 @@ bool PeerManager::SendMessages(CNode* pto)
         // Message: getdata (blocks)
         //
         std::vector<CInv> vGetData;
-        if (!pto->fClient && ((fFetch && !pto->m_limited_node) || !::ChainstateActive().IsInitialBlockDownload()) && state.nBlocksInFlight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+        ExpireFastSyncPendingBlock(pto->GetId(), state, count_microseconds(current_time), "block getdata");
+        const bool disable_core_tcp_blocks = DisableCoreTcpBlockRequests();
+        const bool can_offer_fast_sync_udp_window_base =
+            gArgs.GetBoolArg("-defcoinfastsync", false) &&
+            (pto->nServices.load() & NODE_DEFCOIN_FASTSYNC) &&
+            state.fFastSyncUdpTransportVerified;
+        if (!pto->fClient &&
+            (!disable_core_tcp_blocks || can_offer_fast_sync_udp_window_base) &&
+            ((fFetch && !pto->m_limited_node) || !::ChainstateActive().IsInitialBlockDownload()) &&
+            state.nBlocksInFlight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
             std::vector<const CBlockIndex*> vToDownload;
             NodeId staller = -1;
             FindNextBlocksToDownload(pto->GetId(), MAX_BLOCKS_IN_TRANSIT_PER_PEER - state.nBlocksInFlight, vToDownload, staller, consensusParams);
+            const bool can_offer_fast_sync_udp_window =
+                can_offer_fast_sync_udp_window_base &&
+                count_microseconds(current_time) >= state.nFastSyncDeferBackoffUntil &&
+                state.hashFastSyncPendingBlock.IsNull();
+            if (disable_core_tcp_blocks && !can_offer_fast_sync_udp_window) {
+                // Debug/test mode disables normal TCP block-body requests. If no verified UDP
+                // window can be offered now, avoid repeatedly walking and logging the same
+                // candidate blocks on every message-handler tick.
+                vToDownload.clear();
+            }
+            bool offered_fast_sync_udp_window = false;
             for (const CBlockIndex *pindex : vToDownload) {
+                if (can_offer_fast_sync_udp_window && !offered_fast_sync_udp_window) {
+                    const uint256 hash = pindex->GetBlockHash();
+                    if (MarkBlockAsInFlight(m_mempool, pto->GetId(), hash, pindex)) {
+                        state.hashFastSyncPendingBlock = hash;
+                        state.nFastSyncPendingBlockHeight = pindex->nHeight;
+                        state.nFastSyncPendingUntil = count_microseconds(current_time) + FAST_SYNC_UDP_CLAIM_WINDOW_US;
+                        state.fFastSyncPendingClaimed = false;
+                        offered_fast_sync_udp_window = true;
+                        LogPrint(BCLog::NET, "Fast Sync offered Core-selected UDP transport window for block %s (%d) peer=%d; TCP fallback in %.1fs\n",
+                            hash.ToString(), pindex->nHeight, pto->GetId(), FAST_SYNC_UDP_CLAIM_WINDOW_US / 1000000.0);
+                        continue;
+                    }
+                }
+                if (disable_core_tcp_blocks) {
+                    break;
+                }
                 uint32_t nFetchFlags = GetFetchFlags(*pto);
                 vGetData.push_back(CInv(MSG_BLOCK | nFetchFlags, pindex->GetBlockHash()));
                 MarkBlockAsInFlight(m_mempool, pto->GetId(), pindex->GetBlockHash(), pindex);

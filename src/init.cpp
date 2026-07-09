@@ -64,6 +64,7 @@
 #include <walletinitinterface.h>
 
 #include <functional>
+#include <limits>
 #include <set>
 #include <stdint.h>
 #include <stdio.h>
@@ -430,6 +431,11 @@ void SetupServerArgs(NodeContext& node)
             "(default: 0 = disable pruning blocks, 1 = allow manual pruning via RPC, >=%u = automatically prune block files to stay under the specified target size in MiB)", MIN_DISK_SPACE_FOR_BLOCK_FILES / 1024 / 1024), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-reindex", "Rebuild chain state and block index from the blk*.dat files on disk", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-reindex-chainstate", "Rebuild chain state from the currently indexed blocks. When in pruning mode or if blocks on disk might be corrupted, use full -reindex instead.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-repairwitnessfromheight=<n>",
+        "At startup, scan from height <n> for post-SegWit blocks stored without witness data, "
+        "rewind to the first affected block, erase indexed block data from there, and redownload "
+        "clean block bodies from witness-capable peers.",
+        ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-settings=<file>", strprintf("Specify path to dynamic settings data file. Can be disabled with -nosettings. File is written at runtime and not meant to be edited by users (use %s instead for custom settings). Relative paths will be prefixed by datadir location. (default: %s)", BITCOIN_CONF_FILENAME, BITCOIN_SETTINGS_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 #if HAVE_SYSTEM
     argsman.AddArg("-startupnotify=<cmd>", "Execute command on startup.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -475,6 +481,9 @@ void SetupServerArgs(NodeContext& node)
     argsman.AddArg("-onlydefcoinua", strprintf("Only accept peers whose advertised user agent starts with /Defcoin (default: %u)", DEFAULT_DEFCOIN_USER_AGENT_FILTER), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-acceptlegacymagic", strprintf("Temporarily accept legacy Litecoin-compatible Defcoin P2P message-start bytes during the Defcoin magic migration (default: %u)", DEFAULT_ACCEPT_LEGACY_MAGIC), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
     argsman.AddArg("-allowlannodediscovery", strprintf("Allow learning local/private LAN peer addresses from peer address relay (default: %u). Manually configured and inbound LAN peers are not blocked by this setting.", DEFAULT_ALLOW_LAN_NODE_DISCOVERY), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
+    argsman.AddArg("-defcoinfastsync", "Advertise Defcoin Nu UDP Fast Sync service capability. This should only be enabled by a frontend or service that is actually listening on the Fast Sync UDP port.", ArgsManager::ALLOW_BOOL | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-defcoindisablecoretcpblocks", "Debug-only Nu mode: keep P2P peers, headers, and Core block scheduling active but do not request block bodies through Core's normal TCP getdata downloader. Used to isolate UDP Fast Sync transport.", ArgsManager::ALLOW_BOOL | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-defcoindisablecoreblocksync", "Legacy debug alias for -defcoindisablecoretcpblocks. This does not disable header sync or peer negotiation.", ArgsManager::ALLOW_BOOL | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-timeout=<n>", strprintf("Specify connection timeout in milliseconds (minimum: 1, default: %d)", DEFAULT_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-peertimeout=<n>", strprintf("Specify p2p connection timeout in seconds. This option determines the amount of time a peer may be inactive before the connection to it is dropped. (minimum: 1, default: %d)", DEFAULT_PEER_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torcontrol=<ip>:<port>", strprintf("Tor control port to use if onion listening enabled (default: %s)", DEFAULT_TOR_CONTROL), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -882,7 +891,7 @@ void InitParameterInteraction(ArgsManager& args)
 void InitLogging(const ArgsManager& args)
 {
     // MWEB: Initialize MWEB Logger
-    LoggerAPI::Initialize([](const std::string& logstr) { LogPrintf("%s",logstr.c_str()); });
+    LoggerAPI::Initialize([](const std::string& logstr) { LogPrintf("%s\n", logstr.c_str()); });
 
     LogInstance().m_print_to_file = !args.IsArgNegated("-debuglogfile");
     LogInstance().m_file_path = AbsPathForConfigVal(args.GetArg("-debuglogfile", DEFAULT_DEBUGLOGFILE));
@@ -1724,6 +1733,13 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
             }
 
             bool failed_rewind{false};
+            const int64_t repair_witness_from_height_arg = args.GetArg("-repairwitnessfromheight", 1);
+            const int repair_witness_from_height = repair_witness_from_height_arg < 1 ? 1 :
+                repair_witness_from_height_arg > std::numeric_limits<int>::max() ? std::numeric_limits<int>::max() :
+                static_cast<int>(repair_witness_from_height_arg);
+            if (repair_witness_from_height > 1) {
+                LogPrintf("Repair witness block data requested from height %d\n", repair_witness_from_height);
+            }
             // Can't hold cs_main while calling RewindBlockIndex, so retrieve the relevant
             // chainstates beforehand.
             for (CChainState* chainstate : WITH_LOCK(::cs_main, return chainman.GetAll())) {
@@ -1732,7 +1748,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
                     // It both disconnects blocks based on the chainstate, and drops block data in
                     // BlockIndex() based on lack of available witness data.
                     uiInterface.InitMessage(_("Rewinding blocks...").translated);
-                    if (!chainstate->RewindBlockIndex(chainparams)) {
+                    if (!chainstate->RewindBlockIndex(chainparams, repair_witness_from_height)) {
                         strLoadError = _(
                             "Unable to rewind the database to a pre-fork state. "
                             "You will need to redownload the blockchain");
@@ -1869,8 +1885,21 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
         // The option to not set NODE_WITNESS is only used in the tests and should be removed.
         nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
 
-        // NODE_MWEB requires NODE_WITNESS, so we shouldn't signal for NODE_MWEB without NODE_WITNESS
-        nLocalServices = ServiceFlags(nLocalServices | NODE_MWEB | NODE_MWEB_LIGHT_CLIENT);
+        const auto& mweb_deployment = chainparams.GetConsensus().vDeployments[Consensus::DEPLOYMENT_MWEB];
+        const bool mweb_configured =
+            mweb_deployment.nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE ||
+            mweb_deployment.nStartHeight != std::numeric_limits<int>::max();
+        if (mweb_configured) {
+            // NODE_MWEB requires NODE_WITNESS, so we shouldn't signal for NODE_MWEB without NODE_WITNESS.
+            nLocalServices = ServiceFlags(nLocalServices | NODE_MWEB | NODE_MWEB_LIGHT_CLIENT);
+        }
+    }
+
+    // Advertise Defcoin Nu's optional UDP Fast Sync capability only when an
+    // actual UDP transport owner enabled it. The Qt frontend currently owns
+    // that socket; bare defcoind must not claim this service by default.
+    if (args.GetBoolArg("-defcoinfastsync", false)) {
+        nLocalServices = ServiceFlags(nLocalServices | NODE_DEFCOIN_FASTSYNC);
     }
 
     // ********************************************************* Step 11: import blocks
@@ -1999,11 +2028,10 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
         return InitError(ResolveErrMsg("bind", bind_arg));
     }
 
-    if (connOptions.onion_binds.empty()) {
-        connOptions.onion_binds.push_back(DefaultOnionServiceTarget());
-    }
-
     if (args.GetBoolArg("-listenonion", DEFAULT_LISTEN_ONION)) {
+        if (connOptions.onion_binds.empty()) {
+            connOptions.onion_binds.push_back(DefaultOnionServiceTarget());
+        }
         const auto bind_addr = connOptions.onion_binds.front();
         if (connOptions.onion_binds.size() > 1) {
             InitWarning(strprintf(_("More than one onion bind address is provided. Using %s for the automatically created Tor onion service."), bind_addr.ToStringIPPort()));

@@ -3354,8 +3354,12 @@ void CChainState::ReceivedBlockTransactions(const CBlock& block, CBlockIndex* pi
     pindexNew->nDataPos = pos.nPos;
     pindexNew->nUndoPos = 0;
     pindexNew->nStatus |= BLOCK_HAVE_DATA;
-    if (IsWitnessEnabled(pindexNew->pprev, consensusParams)) {
+    if (IsWitnessEnabled(pindexNew->pprev, consensusParams) &&
+        (GetWitnessCommitmentIndex(block) == NO_WITNESS_COMMITMENT ||
+         (!block.vtx.empty() && block.vtx[0]->HasWitness()))) {
         pindexNew->nStatus |= BLOCK_OPT_WITNESS;
+    } else {
+        pindexNew->nStatus &= ~BLOCK_OPT_WITNESS;
     }
     pindexNew->RaiseValidity(BLOCK_VALID_TRANSACTIONS);
     setDirtyBlockIndex.insert(pindexNew);
@@ -4649,9 +4653,10 @@ void CChainState::EraseBlockData(CBlockIndex* index)
     }
 }
 
-bool CChainState::RewindBlockIndex(const CChainParams& params)
+bool CChainState::RewindBlockIndex(const CChainParams& params, int nMinimumHeight, bool force_from_height)
 {
     // Note that during -reindex-chainstate we are called with an empty m_chain!
+    if (nMinimumHeight < 1) nMinimumHeight = 1;
 
     // First erase all post-segwit blocks without witness not in the main chain,
     // as this can we done without costly DisconnectTip calls. Active
@@ -4659,7 +4664,10 @@ bool CChainState::RewindBlockIndex(const CChainParams& params)
     {
         LOCK(cs_main);
         for (const auto& entry : m_blockman.m_block_index) {
-            if (IsWitnessEnabled(entry.second->pprev, params.GetConsensus()) && !(entry.second->nStatus & BLOCK_OPT_WITNESS) && !m_chain.Contains(entry.second)) {
+            if (entry.second->nHeight >= nMinimumHeight &&
+                IsWitnessEnabled(entry.second->pprev, params.GetConsensus()) &&
+                !(entry.second->nStatus & BLOCK_OPT_WITNESS) &&
+                !m_chain.Contains(entry.second)) {
                 EraseBlockData(entry.second);
             }
         }
@@ -4667,17 +4675,19 @@ bool CChainState::RewindBlockIndex(const CChainParams& params)
 
     // Find what height we need to reorganize to.
     CBlockIndex *tip;
-    int nHeight = 1;
+    int nHeight = nMinimumHeight;
     {
         LOCK(cs_main);
-        while (nHeight <= m_chain.Height()) {
-            // Although SCRIPT_VERIFY_WITNESS is now generally enforced on all
-            // blocks in ConnectBlock, we don't need to go back and
-            // re-download/re-verify blocks from before segwit actually activated.
-            if (IsWitnessEnabled(m_chain[nHeight - 1], params.GetConsensus()) && !(m_chain[nHeight]->nStatus & BLOCK_OPT_WITNESS)) {
-                break;
+        if (!force_from_height) {
+            while (nHeight <= m_chain.Height()) {
+                // Although SCRIPT_VERIFY_WITNESS is now generally enforced on all
+                // blocks in ConnectBlock, we don't need to go back and
+                // re-download/re-verify blocks from before segwit actually activated.
+                if (IsWitnessEnabled(m_chain[nHeight - 1], params.GetConsensus()) && !(m_chain[nHeight]->nStatus & BLOCK_OPT_WITNESS)) {
+                    break;
+                }
+                nHeight++;
             }
-            nHeight++;
         }
 
         tip = m_chain.Tip();
@@ -4690,8 +4700,13 @@ bool CChainState::RewindBlockIndex(const CChainParams& params)
         {
             LOCK(cs_main);
             LOCK(m_mempool.cs);
-            // Make sure nothing changed from under us (this won't happen because RewindBlockIndex runs before importing/network are active)
-            assert(tip == m_chain.Tip());
+            // Make sure nothing changed from under us. Startup repair runs
+            // before importing/network activity; live repair first pauses P2P.
+            // If something still advances the tip, fail cleanly rather than
+            // asserting inside the user's running wallet.
+            if (tip != m_chain.Tip()) {
+                return error("RewindBlockIndex: active tip changed while rewinding from height %i", nHeight);
+            }
             if (tip == nullptr || tip->nHeight < nHeight) break;
             if (fPruneMode && !(tip->nStatus & BLOCK_HAVE_DATA)) {
                 // If pruning, don't try rewinding past the HAVE_DATA point;

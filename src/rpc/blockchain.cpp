@@ -14,6 +14,7 @@
 #include <core_io.h>
 #include <hash.h>
 #include <index/blockfilterindex.h>
+#include <net.h>
 #include <node/coinstats.h>
 #include <node/context.h>
 #include <node/utxo_snapshot.h>
@@ -24,11 +25,14 @@
 #include <rpc/server.h>
 #include <rpc/util.h>
 #include <script/descriptor.h>
+#include <script/script.h>
+#include <script/standard.h>
 #include <streams.h>
 #include <sync.h>
 #include <txdb.h>
 #include <txmempool.h>
 #include <undo.h>
+#include <util/moneystr.h>
 #include <util/ref.h>
 #include <util/strencodings.h>
 #include <util/system.h>
@@ -41,9 +45,13 @@
 
 #include <univalue.h>
 
+#include <algorithm>
+#include <cctype>
 #include <condition_variable>
+#include <future>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 struct CUpdatedBlock
 {
@@ -497,7 +505,355 @@ static RPCHelpMan syncwithvalidationinterfacequeue()
     SyncWithValidationInterfaceQueue();
     return NullUniValue;
 },
+        };
+}
+
+static bool BlockStorageMissingRequiredWitness(const CBlockIndex* pindex, const CBlock& block, const Consensus::Params& consensus)
+{
+    if (pindex == nullptr || pindex->nHeight < consensus.SegwitHeight) return false;
+    if (GetWitnessCommitmentIndex(block) == NO_WITNESS_COMMITMENT) return false;
+    return block.vtx.empty() || !block.vtx[0]->HasWitness();
+}
+
+static int NuIndexWorkerThreads()
+{
+    int script_threads = gArgs.GetArg("-par", DEFAULT_SCRIPTCHECK_THREADS);
+    if (script_threads <= 0) {
+        script_threads += GetNumCores();
+    }
+    script_threads = std::max(script_threads - 1, 0);
+    script_threads = std::min(script_threads, MAX_SCRIPTCHECK_THREADS);
+    return std::max(1, std::min(script_threads > 0 ? script_threads : 1, 8));
+}
+
+struct WitnessScanPartial {
+    int inspected_blocks{0};
+    int witness_required_blocks{0};
+    int block_bodies_read{0};
+    int first_missing_witness_height{-1};
+    int missing_witness_count{0};
+};
+
+static WitnessScanPartial InspectWitnessBlockRange(const std::vector<const CBlockIndex*>& indexes,
+                                                   size_t begin,
+                                                   size_t end,
+                                                   const Consensus::Params& consensus)
+{
+    WitnessScanPartial partial;
+    for (size_t i = begin; i < end; ++i) {
+        const CBlockIndex* pindex = indexes[i];
+        if (pindex == nullptr) continue;
+        ++partial.inspected_blocks;
+
+        if (pindex->nHeight < consensus.SegwitHeight) continue;
+        ++partial.witness_required_blocks;
+
+        bool missing_witness = false;
+        if (IsBlockPruned(pindex)) {
+            missing_witness = !(pindex->nStatus & BLOCK_OPT_WITNESS);
+        } else {
+            CBlock block;
+            if (ReadBlockFromDisk(block, pindex, consensus)) {
+                ++partial.block_bodies_read;
+                missing_witness = BlockStorageMissingRequiredWitness(pindex, block, consensus);
+            } else {
+                missing_witness = !(pindex->nStatus & BLOCK_OPT_WITNESS);
+            }
+        }
+
+        if (!missing_witness) continue;
+        if (partial.first_missing_witness_height < 0) partial.first_missing_witness_height = pindex->nHeight;
+        ++partial.missing_witness_count;
+    }
+    return partial;
+}
+
+static RPCHelpMan scanwitnessblockdata()
+{
+    return RPCHelpMan{"scanwitnessblockdata",
+                "\nInspect a bounded active-chain range for blocks whose local stored body is missing required witness data.\n"
+                "\nThis is an inspection-only RPC used by Nu's Forensics > Witness Repair view. It does not rewind, rescan wallets, or change consensus state.\n",
+                {
+                    {"start_height", RPCArg::Type::NUM, /* default */ "903168", "First active-chain height to inspect."},
+                    {"end_height", RPCArg::Type::NUM, /* default */ "current tip", "Last active-chain height to inspect. Use -1 or omit for current tip."},
+                    {"max_blocks", RPCArg::Type::NUM, /* default */ "20000", "Maximum blocks to inspect in this call. Capped at 100000."},
+                },
+                RPCResult{
+                    RPCResult::Type::OBJ, "", "",
+                    {
+                        {RPCResult::Type::NUM, "start_height", "Requested scan start height."},
+                        {RPCResult::Type::NUM, "end_height", "Requested scan end height after tip bounding."},
+                        {RPCResult::Type::NUM, "scan_end_height", "Last height actually inspected in this call."},
+                        {RPCResult::Type::NUM, "tip", "Active-chain tip at scan start."},
+                        {RPCResult::Type::NUM, "inspected_blocks", "Number of active-chain block entries inspected."},
+                        {RPCResult::Type::NUM, "witness_required_blocks", "Number of inspected blocks at or after SegWit activation."},
+                        {RPCResult::Type::NUM, "block_bodies_read", "Number of local block bodies read from disk."},
+                        {RPCResult::Type::NUM, "worker_threads", "Worker threads used for independent block-body inspection, derived from -par and capped for disk safety."},
+                        {RPCResult::Type::NUM, "next_height", "Next height to request when complete is false."},
+                        {RPCResult::Type::BOOL, "complete", "Whether the requested range is fully inspected."},
+                        {RPCResult::Type::BOOL, "missing_witness_found", "Whether this range found post-SegWit block storage without witness data."},
+                        {RPCResult::Type::NUM, "first_missing_witness_height", "First affected active-chain height in this range, or -1 if none was found."},
+                        {RPCResult::Type::NUM, "missing_witness_count", "Affected active-chain block count in this range."},
+                    }},
+                RPCExamples{
+                    HelpExampleCli("scanwitnessblockdata", "903168 -1 20000")
+            + HelpExampleRpc("scanwitnessblockdata", "903168, -1, 20000")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    NodeContext& node = EnsureNodeContext(request.context);
+    const CChainParams& chainparams = Params();
+
+    int start_height = chainparams.GetConsensus().SegwitHeight;
+    if (!request.params[0].isNull()) {
+        start_height = request.params[0].get_int();
+    }
+    if (start_height < 1) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "start_height must be at least 1");
+    }
+
+    int requested_end_height = -1;
+    if (!request.params[1].isNull()) {
+        requested_end_height = request.params[1].get_int();
+    }
+
+    int max_blocks = 20000;
+    if (!request.params[2].isNull()) {
+        max_blocks = request.params[2].get_int();
+    }
+    max_blocks = std::max(1, std::min(100000, max_blocks));
+
+    std::vector<const CBlockIndex*> indexes;
+    int tip_height = -1;
+    int end_height = -1;
+    int scan_end_height = -1;
+    {
+        LOCK(cs_main);
+        const CChain& active_chain = ::ChainActive();
+        tip_height = active_chain.Height();
+        if (tip_height < 0) {
+            throw JSONRPCError(RPC_MISC_ERROR, "Active chain is empty");
+        }
+        if (start_height < 0 || start_height > tip_height) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "start_height is outside the active chain");
+        }
+        end_height = requested_end_height < 0 ? tip_height : std::min(requested_end_height, tip_height);
+        if (end_height < start_height) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "end_height must be greater than or equal to start_height");
+        }
+        scan_end_height = std::min(end_height, start_height + max_blocks - 1);
+        indexes.reserve(scan_end_height - start_height + 1);
+        for (int height = start_height; height <= scan_end_height; ++height) {
+            indexes.push_back(active_chain[height]);
+        }
+    }
+
+    const int block_count = static_cast<int>(indexes.size());
+    const int worker_count = std::max(1, std::min(NuIndexWorkerThreads(), block_count));
+    const size_t chunk = (indexes.size() + static_cast<size_t>(worker_count) - 1) / static_cast<size_t>(worker_count);
+    std::vector<std::future<WitnessScanPartial>> futures;
+    futures.reserve(worker_count);
+    for (int worker = 0; worker < worker_count; ++worker) {
+        const size_t begin = static_cast<size_t>(worker) * chunk;
+        if (begin >= indexes.size()) break;
+        const size_t end = std::min(indexes.size(), begin + chunk);
+        futures.emplace_back(std::async(std::launch::async, [&, begin, end]() {
+            return InspectWitnessBlockRange(indexes, begin, end, chainparams.GetConsensus());
+        }));
+    }
+
+    int inspected_blocks = 0;
+    int witness_required_blocks = 0;
+    int block_bodies_read = 0;
+    const int next_height = scan_end_height + 1;
+    int first_missing_witness_height = -1;
+    int missing_witness_count = 0;
+    for (auto& future : futures) {
+        node.rpc_interruption_point();
+        const WitnessScanPartial partial = future.get();
+        inspected_blocks += partial.inspected_blocks;
+        witness_required_blocks += partial.witness_required_blocks;
+        block_bodies_read += partial.block_bodies_read;
+        missing_witness_count += partial.missing_witness_count;
+        if (partial.first_missing_witness_height >= 0 &&
+            (first_missing_witness_height < 0 || partial.first_missing_witness_height < first_missing_witness_height)) {
+            first_missing_witness_height = partial.first_missing_witness_height;
+        }
+    }
+
+    UniValue result(UniValue::VOBJ);
+    result.pushKV("start_height", start_height);
+    result.pushKV("end_height", end_height);
+    result.pushKV("scan_end_height", scan_end_height);
+    result.pushKV("tip", tip_height);
+    result.pushKV("inspected_blocks", inspected_blocks);
+    result.pushKV("witness_required_blocks", witness_required_blocks);
+    result.pushKV("block_bodies_read", block_bodies_read);
+    result.pushKV("worker_threads", worker_count);
+    result.pushKV("next_height", next_height);
+    result.pushKV("complete", next_height > end_height);
+    result.pushKV("missing_witness_found", first_missing_witness_height >= 0);
+    result.pushKV("first_missing_witness_height", first_missing_witness_height);
+    result.pushKV("missing_witness_count", missing_witness_count);
+    return result;
+},
     };
+}
+
+static RPCHelpMan repairwitnessblockdata()
+{
+    return RPCHelpMan{"repairwitnessblockdata",
+                "\nInspect active-chain blocks stored without witness data from the requested height, optionally rewind from the first affected block, and resume networking for redownload.\n"
+                "\nThis repairs local block-body storage only when requested. It is not a wallet rescan and does not change consensus rules.\n",
+                {
+                    {"start_height", RPCArg::Type::NUM, /* default */ "903168", "Height to begin looking for post-SegWit blocks missing witness data."},
+                    {"resume_network", RPCArg::Type::BOOL, /* default */ "true", "Resume P2P networking after the rewind step if it was active before repair."},
+                    {"fix_missing_witness", RPCArg::Type::BOOL, /* default */ "true", "If true, rewind from the first affected block. If false, inspect and report only."},
+                },
+                RPCResult{
+                    RPCResult::Type::OBJ, "", "",
+                    {
+                        {RPCResult::Type::NUM, "start_height", "The requested scan start height."},
+                        {RPCResult::Type::NUM, "inspected_blocks", "Number of active-chain block entries inspected."},
+                        {RPCResult::Type::BOOL, "missing_witness_found", "Whether a post-SegWit active-chain block missing witness data was found."},
+                        {RPCResult::Type::NUM, "first_missing_witness_height", "First affected active-chain height, or -1 if none was found."},
+                        {RPCResult::Type::BOOL, "fix_missing_witness", "Whether the RPC was allowed to rewind affected blocks."},
+                        {RPCResult::Type::NUM, "height_before", "Active-chain height before repair."},
+                        {RPCResult::Type::NUM, "height_after_rewind", "Active-chain height after the rewind step."},
+                        {RPCResult::Type::BOOL, "network_was_active", "Whether P2P networking was active before repair."},
+                        {RPCResult::Type::BOOL, "network_active", "Whether P2P networking is active after repair."},
+                        {RPCResult::Type::BOOL, "rewound", "Whether the active-chain height changed during the rewind step."},
+                        {RPCResult::Type::STR, "next_step", "What happens after the RPC returns."},
+                    }},
+                RPCExamples{
+                    HelpExampleCli("repairwitnessblockdata", "903168")
+            + HelpExampleRpc("repairwitnessblockdata", "903168")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    ChainstateManager& chainman = EnsureChainman(request.context);
+    CConnman& connman = EnsureConnman(request.context);
+
+    int start_height = 903168;
+    if (!request.params[0].isNull()) {
+        start_height = request.params[0].get_int();
+    }
+    if (start_height < 1) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "start_height must be at least 1");
+    }
+
+    bool resume_network = true;
+    if (!request.params[1].isNull()) {
+        resume_network = request.params[1].get_bool();
+    }
+
+    bool fix_missing_witness = true;
+    if (!request.params[2].isNull()) {
+        fix_missing_witness = request.params[2].get_bool();
+    }
+
+    const CChainParams& chainparams = Params();
+    int height_before{0};
+    int inspected_blocks{0};
+    int first_missing_witness_height{-1};
+    std::vector<const CBlockIndex*> indexes;
+    {
+        LOCK(cs_main);
+        const CChain& active_chain = chainman.ActiveChain();
+        height_before = active_chain.Height();
+        if (start_height <= height_before) {
+            indexes.reserve(height_before - start_height + 1);
+            for (int height = start_height; height <= height_before; ++height) {
+                indexes.push_back(active_chain[height]);
+            }
+        }
+    }
+
+    for (const CBlockIndex* pindex : indexes) {
+        if (pindex == nullptr) continue;
+        ++inspected_blocks;
+        if (inspected_blocks % 2000 == 0) {
+            EnsureNodeContext(request.context).rpc_interruption_point();
+        }
+        if (pindex->nHeight < chainparams.GetConsensus().SegwitHeight) continue;
+
+        bool missing_witness = false;
+        if (IsBlockPruned(pindex)) {
+            missing_witness = !(pindex->nStatus & BLOCK_OPT_WITNESS);
+        } else {
+            CBlock block;
+            if (ReadBlockFromDisk(block, pindex, chainparams.GetConsensus())) {
+                missing_witness = BlockStorageMissingRequiredWitness(pindex, block, chainparams.GetConsensus());
+            } else {
+                missing_witness = !(pindex->nStatus & BLOCK_OPT_WITNESS);
+            }
+        }
+
+        if (!missing_witness) continue;
+        if (first_missing_witness_height < 0) first_missing_witness_height = pindex->nHeight;
+        if (fix_missing_witness) break;
+    }
+
+    const bool network_was_active = connman.GetNetworkActive();
+
+    auto make_result = [&](int height_after, bool rewound, const std::string& next_step) {
+        UniValue ret(UniValue::VOBJ);
+        ret.pushKV("start_height", start_height);
+        ret.pushKV("inspected_blocks", inspected_blocks);
+        ret.pushKV("missing_witness_found", first_missing_witness_height >= 0);
+        ret.pushKV("first_missing_witness_height", first_missing_witness_height);
+        ret.pushKV("fix_missing_witness", fix_missing_witness);
+        ret.pushKV("height_before", height_before);
+        ret.pushKV("height_after_rewind", height_after);
+        ret.pushKV("network_was_active", network_was_active);
+        ret.pushKV("network_active", connman.GetNetworkActive());
+        ret.pushKV("rewound", rewound);
+        ret.pushKV("next_step", next_step);
+        return ret;
+    };
+
+    if (first_missing_witness_height < 0) {
+        LogPrintf("Inspect witness block data requested by RPC from height %d: inspected %d active-chain blocks, no missing witness data found\n", start_height, inspected_blocks);
+        return make_result(height_before, false, "Inspection found no post-SegWit active-chain blocks missing witness data. No repair was needed.");
+    }
+
+    if (!fix_missing_witness) {
+        LogPrintf("Inspect witness block data requested by RPC from height %d: first missing witness data at height %d; repair disabled\n", start_height, first_missing_witness_height);
+        return make_result(height_before, false, strprintf("Inspection found missing witness data beginning at height %d. Fix missing witness data was off, so no block data was changed.", first_missing_witness_height));
+    }
+
+    struct NetworkRestorer {
+        CConnman& connman;
+        bool restore;
+        bool was_active;
+        ~NetworkRestorer()
+        {
+            if (restore && was_active) connman.SetNetworkActive(true);
+        }
+    } network_restorer{connman, resume_network, network_was_active};
+
+    connman.SetNetworkActive(false);
+    SyncWithValidationInterfaceQueue();
+
+    LogPrintf("Repair witness block data requested by RPC from height %d; first missing witness data found at height %d after inspecting block bodies\n", start_height, first_missing_witness_height);
+    for (CChainState* chainstate : WITH_LOCK(::cs_main, return chainman.GetAll())) {
+        if (!chainstate->RewindBlockIndex(chainparams, first_missing_witness_height, true)) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to rewind incomplete witness block data. Check debug.log for details.");
+        }
+    }
+    SyncWithValidationInterfaceQueue();
+
+    const int height_after = WITH_LOCK(cs_main, return chainman.ActiveChain().Height());
+    if (resume_network && network_was_active) {
+        connman.SetNetworkActive(true);
+        network_restorer.restore = false;
+    }
+
+    return make_result(height_after, height_after < height_before, height_after < height_before
+        ? "P2P networking has been resumed; the node will redownload missing block bodies from witness-capable peers."
+        : "Inspection found missing witness data, but no active-chain rewind was needed from the requested height.");
+	},
+	    };
 }
 
 static RPCHelpMan getdifficulty()
@@ -1041,6 +1397,332 @@ static CBlock GetBlockChecked(const CBlockIndex* pblockindex)
     }
 
     return block;
+}
+
+static bool IsNullDataOutput(const CTxOut& txout)
+{
+    return txout.scriptPubKey.IsUnspendable() &&
+           !txout.scriptPubKey.empty() &&
+           txout.scriptPubKey[0] == OP_RETURN;
+}
+
+static bool IsForensicsCandidateOutput(const CTxOut& txout)
+{
+    return txout.scriptPubKey.IsUnspendable() && !txout.scriptPubKey.empty();
+}
+
+static std::string TrimDecodedText(std::string text)
+{
+    const auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
+    while (!text.empty() && is_space(static_cast<unsigned char>(text.front()))) text.erase(text.begin());
+    while (!text.empty() && is_space(static_cast<unsigned char>(text.back()))) text.pop_back();
+    return text;
+}
+
+static std::string DecodeNullDataPayload(const std::vector<unsigned char>& payload)
+{
+    if (payload.empty()) return "(empty payload)";
+
+    int printable = 0;
+    std::string out;
+    out.reserve(payload.size());
+    for (const unsigned char c : payload) {
+        if (c == '\r' || c == '\n' || c == '\t' || (c >= 32 && c <= 126)) {
+            out.push_back(static_cast<char>(c));
+            ++printable;
+        } else {
+            out.push_back('.');
+        }
+    }
+
+    out = TrimDecodedText(out);
+    if (out.empty() || printable * 100 < static_cast<int>(payload.size()) * 55) {
+        return "(non-text payload: " + HexStr(payload) + ")";
+    }
+    return out;
+}
+
+static bool IsMostlyPrintableNullDataPayload(const std::vector<unsigned char>& payload)
+{
+    if (payload.empty()) return false;
+    int printable = 0;
+    for (const unsigned char c : payload) {
+        if (c == '\r' || c == '\n' || c == '\t' || (c >= 32 && c <= 126)) {
+            ++printable;
+        }
+    }
+    return printable * 100 >= static_cast<int>(payload.size()) * 55;
+}
+
+static std::vector<unsigned char> ExtractNullDataPayload(const CScript& script)
+{
+    std::vector<unsigned char> payload;
+    CScript::const_iterator pc = script.begin();
+    opcodetype opcode;
+    std::vector<unsigned char> data;
+    if (!script.GetOp(pc, opcode, data) || opcode != OP_RETURN) return payload;
+
+    while (pc < script.end()) {
+        data.clear();
+        if (!script.GetOp(pc, opcode, data)) break;
+        if (!data.empty()) {
+            payload.insert(payload.end(), data.begin(), data.end());
+        } else if (opcode == OP_0) {
+            payload.push_back(0);
+        } else if (opcode >= OP_1 && opcode <= OP_16) {
+            payload.push_back(static_cast<unsigned char>(CScript::DecodeOP_N(opcode)));
+        }
+    }
+    return payload;
+}
+
+static bool IsBip141WitnessCommitmentPayload(const std::vector<unsigned char>& payload)
+{
+    return payload.size() >= 4 &&
+           payload[0] == 0xaa &&
+           payload[1] == 0x21 &&
+           payload[2] == 0xa9 &&
+           payload[3] == 0xed;
+}
+
+static bool HasBip141WitnessCommitmentOutput(const CTransaction& tx)
+{
+    for (const CTxOut& txout : tx.vout) {
+        if (!IsNullDataOutput(txout)) continue;
+        if (IsBip141WitnessCommitmentPayload(ExtractNullDataPayload(txout.scriptPubKey))) return true;
+    }
+    return false;
+}
+
+static std::string ScriptPrefixHex(const CScript& script, size_t bytes)
+{
+    const size_t count = std::min(bytes, static_cast<size_t>(script.size()));
+    return HexStr(std::vector<unsigned char>(script.begin(), script.begin() + count));
+}
+
+static std::string PayloadPrefixHex(const std::vector<unsigned char>& payload, size_t bytes)
+{
+    const size_t count = std::min(bytes, payload.size());
+    if (count == 0) return "";
+    return HexStr(std::vector<unsigned char>(payload.begin(), payload.begin() + count));
+}
+
+static std::string JoinReasons(const std::vector<std::string>& reasons)
+{
+    std::string out;
+    for (const std::string& reason : reasons) {
+        if (!out.empty()) out += "; ";
+        out += reason;
+    }
+    return out;
+}
+
+static RPCHelpMan scanirregularmessages()
+{
+    return RPCHelpMan{"scanirregularmessages",
+                "\nScans active-chain blocks for nonstandard OP_RETURN text payloads and returns rows for the Nu Forensics view.\n"
+                "This inspects block data already accepted into the chain. It does not change consensus state.\n",
+                {
+                    {"start_height", RPCArg::Type::NUM, /* default */ "0", "First block height to inspect."},
+                    {"end_height", RPCArg::Type::NUM, /* default */ "current tip", "Last block height to inspect. Use -1 or omit for current tip."},
+                    {"max_results", RPCArg::Type::NUM, /* default */ "500", "Maximum flagged rows to return in this call. Capped at 5000."},
+                    {"max_blocks", RPCArg::Type::NUM, /* default */ "25000", "Maximum blocks to inspect in this call. Capped at 100000."},
+                },
+                RPCResult{
+                    RPCResult::Type::OBJ, "", "",
+                    {
+                        {RPCResult::Type::NUM, "start_height", "Requested scan start height."},
+                        {RPCResult::Type::NUM, "end_height", "Requested scan end height after tip bounding."},
+                        {RPCResult::Type::NUM, "tip", "Active-chain tip at scan start."},
+                        {RPCResult::Type::NUM, "scanned_blocks", "Blocks inspected in this call."},
+                        {RPCResult::Type::NUM, "next_height", "Next height to request when complete is false."},
+                        {RPCResult::Type::BOOL, "complete", "Whether the requested range is fully scanned."},
+                        {RPCResult::Type::BOOL, "missing_witness_found", "Whether this scan chunk found active-chain post-SegWit block storage without witness data."},
+                        {RPCResult::Type::NUM, "first_missing_witness_height", "First affected active-chain height in this scan chunk, or -1 if none was found."},
+                        {RPCResult::Type::NUM, "missing_witness_count", "Affected active-chain block count in this scan chunk."},
+                        {RPCResult::Type::ARR, "results", "Flagged OP_RETURN rows.",
+                        {
+                            {RPCResult::Type::OBJ, "", "",
+                            {
+                                {RPCResult::Type::NUM, "block_height", "Block height."},
+                                {RPCResult::Type::STR_HEX, "txid", "Transaction ID."},
+                                {RPCResult::Type::NUM, "vout", "Output index."},
+                                {RPCResult::Type::NUM, "burned_defcoin", "Amount burned into the unspendable output."},
+                                {RPCResult::Type::STR_AMOUNT, "burned_text", "Amount formatted as DFC."},
+                                {RPCResult::Type::STR, "decoded_text", "Printable decoded text, or a hex summary when not mostly text."},
+                                {RPCResult::Type::STR, "reason", "Short irregularity label."},
+                                {RPCResult::Type::NUM, "script_size", "ScriptPubKey byte length."},
+                                {RPCResult::Type::STR_HEX, "script_hex", "Raw scriptPubKey bytes."},
+                                {RPCResult::Type::STR_HEX, "script_prefix4", "First four scriptPubKey bytes, when available."},
+                                {RPCResult::Type::STR_HEX, "payload_hex", "Raw pushed payload bytes."},
+                                {RPCResult::Type::STR_HEX, "payload_prefix4", "First four pushed payload bytes, when available."},
+                            }},
+                        }},
+                    }},
+                RPCExamples{
+                    HelpExampleCli("scanirregularmessages", "0 -1 500 25000")
+            + HelpExampleRpc("scanirregularmessages", "0, -1, 500, 25000")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    NodeContext& node = EnsureNodeContext(request.context);
+
+    int start_height = 0;
+    if (!request.params[0].isNull()) {
+        start_height = request.params[0].get_int();
+    }
+
+    int requested_end_height = -1;
+    if (!request.params[1].isNull()) {
+        requested_end_height = request.params[1].get_int();
+    }
+
+    int max_results = 500;
+    if (!request.params[2].isNull()) {
+        max_results = request.params[2].get_int();
+    }
+    max_results = std::max(1, std::min(5000, max_results));
+
+    int max_blocks = 25000;
+    if (!request.params[3].isNull()) {
+        max_blocks = request.params[3].get_int();
+    }
+    max_blocks = std::max(1, std::min(100000, max_blocks));
+
+    std::vector<const CBlockIndex*> indexes;
+    int tip_height = -1;
+    int end_height = -1;
+    int scan_end_height = -1;
+    {
+        LOCK(cs_main);
+        const CChain& active_chain = ::ChainActive();
+        tip_height = active_chain.Height();
+        if (tip_height < 0) {
+            throw JSONRPCError(RPC_MISC_ERROR, "Active chain is empty");
+        }
+        if (start_height < 0 || start_height > tip_height) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "start_height is outside the active chain");
+        }
+        end_height = requested_end_height < 0 ? tip_height : std::min(requested_end_height, tip_height);
+        if (end_height < start_height) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "end_height must be greater than or equal to start_height");
+        }
+        scan_end_height = std::min(end_height, start_height + max_blocks - 1);
+        indexes.reserve(scan_end_height - start_height + 1);
+        for (int height = start_height; height <= scan_end_height; ++height) {
+            indexes.push_back(active_chain[height]);
+        }
+    }
+
+    UniValue rows(UniValue::VARR);
+    int scanned_blocks = 0;
+    int next_height = start_height;
+    int first_missing_witness_height = -1;
+    int missing_witness_count = 0;
+
+    for (const CBlockIndex* pindex : indexes) {
+        if (rows.size() >= static_cast<size_t>(max_results)) break;
+        if (scanned_blocks > 0 && scanned_blocks % 2000 == 0) node.rpc_interruption_point();
+
+        CBlock block;
+        if (IsBlockPruned(pindex)) {
+            if (pindex != nullptr && pindex->nHeight > 0 && pindex->pprev != nullptr &&
+                IsWitnessEnabled(pindex->pprev, Params().GetConsensus()) &&
+                !(pindex->nStatus & BLOCK_OPT_WITNESS)) {
+                if (first_missing_witness_height < 0) first_missing_witness_height = pindex->nHeight;
+                ++missing_witness_count;
+            }
+            next_height = pindex->nHeight + 1;
+            ++scanned_blocks;
+            continue;
+        }
+        if (!ReadBlockFromDisk(block, pindex, Params().GetConsensus())) {
+            next_height = pindex->nHeight + 1;
+            ++scanned_blocks;
+            continue;
+        }
+        if (BlockStorageMissingRequiredWitness(pindex, block, Params().GetConsensus())) {
+            if (first_missing_witness_height < 0) first_missing_witness_height = pindex->nHeight;
+            ++missing_witness_count;
+        }
+
+        for (const auto& tx : block.vtx) {
+            int null_data_outputs = 0;
+            for (const CTxOut& txout : tx->vout) {
+                if (IsNullDataOutput(txout)) ++null_data_outputs;
+            }
+            const bool coinbase_with_bip141_commitment = tx->IsCoinBase() && HasBip141WitnessCommitmentOutput(*tx);
+            int candidate_outputs = 0;
+            for (const CTxOut& txout : tx->vout) {
+                if (IsForensicsCandidateOutput(txout)) ++candidate_outputs;
+            }
+            if (candidate_outputs == 0) continue;
+
+            for (size_t vout_index = 0; vout_index < tx->vout.size(); ++vout_index) {
+                if (rows.size() >= static_cast<size_t>(max_results)) break;
+                const CTxOut& txout = tx->vout[vout_index];
+                if (!IsForensicsCandidateOutput(txout)) continue;
+
+                const std::vector<unsigned char> payload = ExtractNullDataPayload(txout.scriptPubKey);
+                const bool null_data = IsNullDataOutput(txout);
+                const bool burned_value = txout.nValue > 0;
+                const bool oversized = txout.scriptPubKey.size() > MAX_OP_RETURN_RELAY;
+                const bool non_op_return = !null_data;
+                const bool active_opcodes = null_data && !txout.scriptPubKey.IsPushOnly(txout.scriptPubKey.begin() + 1);
+                const bool multiple = null_data && null_data_outputs > 1;
+                const bool only_multiple_reason = multiple && !burned_value && !oversized && !active_opcodes && !non_op_return;
+                const bool routine_coinbase_metadata =
+                    only_multiple_reason &&
+                    coinbase_with_bip141_commitment &&
+                    !IsBip141WitnessCommitmentPayload(payload) &&
+                    !IsMostlyPrintableNullDataPayload(payload);
+                if (routine_coinbase_metadata) continue;
+                if (!burned_value && !oversized && !active_opcodes && !multiple && !non_op_return) continue;
+
+                std::vector<std::string> reasons;
+                if (non_op_return) reasons.push_back("Unspendable script without OP_RETURN 6a prefix");
+                if (burned_value) reasons.push_back("Burned nonzero Defcoin in OP_RETURN");
+                if (oversized) reasons.push_back("Bypassed standard size limits");
+                if (active_opcodes) reasons.push_back("Contains active execution opcodes");
+                if (multiple) reasons.push_back("Multiple OP_RETURN outputs in one transaction");
+
+                const std::string script_hex = HexStr(std::vector<unsigned char>(txout.scriptPubKey.begin(), txout.scriptPubKey.end()));
+
+                UniValue entry(UniValue::VOBJ);
+                entry.pushKV("block_height", pindex->nHeight);
+                entry.pushKV("txid", tx->GetHash().ToString());
+                entry.pushKV("vout", static_cast<int>(vout_index));
+                entry.pushKV("burned_defcoin", ValueFromAmount(txout.nValue));
+                entry.pushKV("burned_text", FormatMoney(txout.nValue));
+                entry.pushKV("decoded_text", DecodeNullDataPayload(payload));
+                entry.pushKV("reason", JoinReasons(reasons));
+                entry.pushKV("script_size", static_cast<int>(txout.scriptPubKey.size()));
+                entry.pushKV("script_hex", script_hex);
+                entry.pushKV("script_prefix4", ScriptPrefixHex(txout.scriptPubKey, 4));
+                entry.pushKV("payload_hex", HexStr(payload));
+                entry.pushKV("payload_prefix4", PayloadPrefixHex(payload, 4));
+                rows.push_back(entry);
+            }
+        }
+
+        next_height = pindex->nHeight + 1;
+        ++scanned_blocks;
+    }
+
+    UniValue result(UniValue::VOBJ);
+    result.pushKV("start_height", start_height);
+    result.pushKV("end_height", end_height);
+    result.pushKV("tip", tip_height);
+    result.pushKV("scanned_blocks", scanned_blocks);
+    result.pushKV("next_height", next_height);
+    result.pushKV("complete", next_height > end_height);
+    result.pushKV("missing_witness_found", first_missing_witness_height >= 0);
+    result.pushKV("first_missing_witness_height", first_missing_witness_height);
+    result.pushKV("missing_witness_count", missing_witness_count);
+    result.pushKV("results", rows);
+    return result;
+},
+    };
 }
 
 static CBlockUndo GetUndoChecked(const CBlockIndex* pblockindex)
@@ -2666,6 +3348,9 @@ static const CRPCCommand commands[] =
     { "blockchain",         "getmempoolentry",        &getmempoolentry,        {"txid"} },
     { "blockchain",         "getmempoolinfo",         &getmempoolinfo,         {} },
     { "blockchain",         "getrawmempool",          &getrawmempool,          {"verbose", "mempool_sequence"} },
+    { "blockchain",         "scanwitnessblockdata",   &scanwitnessblockdata,   {"start_height", "end_height", "max_blocks"} },
+    { "blockchain",         "repairwitnessblockdata", &repairwitnessblockdata, {"start_height", "resume_network", "fix_missing_witness"} },
+    { "blockchain",         "scanirregularmessages",  &scanirregularmessages,  {"start_height", "end_height", "max_results", "max_blocks"} },
     { "blockchain",         "gettxout",               &gettxout,               {"txid","n","include_mempool"} },
     { "blockchain",         "gettxoutsetinfo",        &gettxoutsetinfo,        {"hash_type"} },
     { "blockchain",         "pruneblockchain",        &pruneblockchain,        {"height"} },

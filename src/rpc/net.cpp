@@ -889,6 +889,110 @@ static RPCHelpMan setonlydefcoinuseragents()
     };
 }
 
+static RPCHelpMan getacceptlegacymagic()
+{
+    return RPCHelpMan{"getacceptlegacymagic",
+                "\nReturns whether legacy Litecoin-compatible Defcoin message-start bytes are accepted.\n",
+                {},
+                RPCResult{RPCResult::Type::BOOL, "", "true when legacy magic is accepted"},
+                RPCExamples{
+                    HelpExampleCli("getacceptlegacymagic", "")
+            + HelpExampleRpc("getacceptlegacymagic", "")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    return GetAcceptLegacyMagic();
+},
+    };
+}
+
+static RPCHelpMan setacceptlegacymagic()
+{
+    return RPCHelpMan{"setacceptlegacymagic",
+                "\nEnable or disable temporary acceptance of legacy Litecoin-compatible Defcoin message-start bytes.\n",
+                {
+                    {"enabled", RPCArg::Type::BOOL, RPCArg::Optional::NO, "true to accept legacy magic in compatibility mode, false to accept only Defcoin magic"},
+                },
+                RPCResult{RPCResult::Type::BOOL, "", "The legacy-magic acceptance state after applying the request"},
+                RPCExamples{
+                    HelpExampleCli("setacceptlegacymagic", "true")
+            + HelpExampleRpc("setacceptlegacymagic", "true")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    SetAcceptLegacyMagic(request.params[0].get_bool());
+    return GetAcceptLegacyMagic();
+},
+    };
+}
+
+static RPCHelpMan getallowlannodediscovery()
+{
+    return RPCHelpMan{"getallowlannodediscovery",
+                "\nReturns whether LAN/private peer addresses may be learned from address relay.\n",
+                {},
+                RPCResult{RPCResult::Type::BOOL, "", "true when LAN node discovery/address learning is enabled"},
+                RPCExamples{
+                    HelpExampleCli("getallowlannodediscovery", "")
+            + HelpExampleRpc("getallowlannodediscovery", "")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    return GetAllowLanNodeDiscovery();
+},
+    };
+}
+
+static RPCHelpMan setallowlannodediscovery()
+{
+    return RPCHelpMan{"setallowlannodediscovery",
+                "\nEnable or disable learning LAN/private peer addresses from address relay.\n",
+                {
+                    {"enabled", RPCArg::Type::BOOL, RPCArg::Optional::NO, "true to allow LAN node discovery/address learning, false to discard relayed LAN/private addresses"},
+                },
+                RPCResult{RPCResult::Type::BOOL, "", "The LAN node discovery state after applying the request"},
+                RPCExamples{
+                    HelpExampleCli("setallowlannodediscovery", "true")
+            + HelpExampleRpc("setallowlannodediscovery", "true")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    const bool enabled = request.params[0].get_bool();
+    SetAllowLanNodeDiscovery(enabled);
+    fDiscover = enabled;
+    if (enabled) {
+        Discover();
+    }
+    return GetAllowLanNodeDiscovery();
+},
+    };
+}
+
+static RPCHelpMan setupnpportmapping()
+{
+    return RPCHelpMan{"setupnpportmapping",
+                "\nEnable or disable UPnP port mapping without restarting.\n",
+                {
+                    {"enabled", RPCArg::Type::BOOL, RPCArg::Optional::NO, "true to start UPnP port mapping, false to stop it"},
+                },
+                RPCResult{RPCResult::Type::BOOL, "", "The value that was passed in"},
+                RPCExamples{
+                    HelpExampleCli("setupnpportmapping", "true")
+            + HelpExampleRpc("setupnpportmapping", "true")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    if (request.params[0].get_bool()) {
+        StartMapPort();
+    } else {
+        InterruptMapPort();
+        StopMapPort();
+    }
+    return request.params[0].get_bool();
+},
+    };
+}
+
 static RPCHelpMan getnodeaddresses()
 {
     return RPCHelpMan{"getnodeaddresses",
@@ -993,6 +1097,112 @@ static RPCHelpMan addpeeraddress()
     };
 }
 
+static RPCHelpMan reservefastsyncblock()
+{
+    return RPCHelpMan{"reservefastsyncblock",
+        "\nReserve or release a block in Core's normal in-flight table for Nu Fast Sync transport coordination.\n"
+        "This is used by Defcoin Core Nu so UDP and TCP are treated as transport choices for one logical peer,\n"
+        "not as independent reasons to request the same block twice. It does not change consensus rules and\n"
+        "older Defcoin Core peers continue to use normal TCP block sync.\n",
+        {
+            {"action", RPCArg::Type::STR, RPCArg::Optional::NO, "\"reserve\", \"reserve-next\", \"release\", \"transport-verified\", or \"transport-unverified\""},
+            {"nodeid", RPCArg::Type::NUM, RPCArg::Optional::NO, "Connected peer id from getpeerinfo"},
+            {"height_or_hash", RPCArg::Type::STR, RPCArg::Optional::OMITTED_NAMED_ARG, "Block height for reserve, block hash for release; omit for reserve-next and transport actions"},
+        },
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::BOOL, "success", "whether the action succeeded"},
+                {RPCResult::Type::NUM, "height", "reserved block height, when known"},
+                {RPCResult::Type::STR_HEX, "hash", "reserved or released block hash, when known"},
+                {RPCResult::Type::STR, "reason", "short reason string"},
+            },
+        },
+        RPCExamples{
+            HelpExampleCli("reservefastsyncblock", "\"reserve\" 1 903169")
+    + HelpExampleCli("reservefastsyncblock", "\"reserve-next\" 1")
+    + HelpExampleCli("reservefastsyncblock", "\"release\" 1 \"0000000000000000000000000000000000000000000000000000000000000000\"")
+    + HelpExampleCli("reservefastsyncblock", "\"transport-verified\" 1")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    NodeContext& node = EnsureNodeContext(request.context);
+    if (!node.connman || !node.mempool) {
+        throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
+    }
+
+    const std::string action = ToLower(request.params[0].get_str());
+    int64_t parsed_nodeid = -1;
+    const UniValue& nodeid_value = request.params[1];
+    if (nodeid_value.isNum()) {
+        parsed_nodeid = nodeid_value.get_int64();
+    } else if (nodeid_value.isStr() && ParseInt64(nodeid_value.get_str(), &parsed_nodeid)) {
+        // Nu's Qt front end and defcoin-cli can stringify hidden RPC args.
+        // Accept numeric strings so Fast Sync transport reservation does not
+        // depend on client-side argument conversion tables.
+    } else {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Peer node id must be a numeric value");
+    }
+    if (parsed_nodeid < 0) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Peer node id must be non-negative");
+    }
+    const NodeId nodeid = (NodeId)parsed_nodeid;
+    const std::string height_or_hash = request.params.size() > 2 ? request.params[2].getValStr() : "";
+
+    UniValue obj(UniValue::VOBJ);
+    if (action == "reserve") {
+        int height = 0;
+        if (!ParseInt32(height_or_hash, &height)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Reserve action requires a numeric block height");
+        }
+        uint256 hash;
+        std::string reason;
+        const bool reserved = ReserveFastSyncBlockInFlight(*node.mempool, nodeid, height, hash, reason);
+        obj.pushKV("success", reserved);
+        obj.pushKV("height", height);
+        if (!hash.IsNull()) obj.pushKV("hash", hash.ToString());
+        obj.pushKV("reason", reason);
+        return obj;
+    }
+    if (action == "reserve-next") {
+        uint256 hash;
+        int height = -1;
+        std::string reason;
+        const bool reserved = ReserveNextFastSyncBlockInFlight(*node.mempool, nodeid, hash, height, reason);
+        obj.pushKV("success", reserved);
+        if (height >= 0) obj.pushKV("height", height);
+        if (!hash.IsNull()) obj.pushKV("hash", hash.ToString());
+        obj.pushKV("reason", reason);
+        return obj;
+    }
+    if (action == "release") {
+        if (height_or_hash.empty()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Release action requires a 64-character block hash");
+        }
+        uint256 hash;
+        if (!ParseHashStr(height_or_hash, hash)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Release action requires a 64-character block hash");
+        }
+        const bool released = ReleaseFastSyncBlockInFlight(nodeid, hash);
+        obj.pushKV("success", released);
+        obj.pushKV("hash", hash.ToString());
+        obj.pushKV("reason", released ? "released" : "not-in-flight");
+        return obj;
+    }
+    if (action == "transport-verified" || action == "transport-unverified") {
+        std::string reason;
+        const bool verified = action == "transport-verified";
+        const bool updated = SetFastSyncPeerTransportVerified(nodeid, verified, reason);
+        obj.pushKV("success", updated);
+        obj.pushKV("reason", reason);
+        return obj;
+    }
+
+    throw JSONRPCError(RPC_INVALID_PARAMETER, "Unknown action; expected \"reserve\", \"reserve-next\", \"release\", \"transport-verified\", or \"transport-unverified\"");
+},
+    };
+}
+
 void RegisterNetRPCCommands(CRPCTable &t)
 {
 // clang-format off
@@ -1013,7 +1223,13 @@ static const CRPCCommand commands[] =
     { "network",            "setnetworkactive",       &setnetworkactive,       {"state"} },
     { "network",            "getonlydefcoinuseragents", &getonlydefcoinuseragents, {} },
     { "network",            "setonlydefcoinuseragents", &setonlydefcoinuseragents, {"enabled"} },
+    { "network",            "getacceptlegacymagic",   &getacceptlegacymagic,   {} },
+    { "network",            "setacceptlegacymagic",   &setacceptlegacymagic,   {"enabled"} },
+    { "network",            "getallowlannodediscovery", &getallowlannodediscovery, {} },
+    { "network",            "setallowlannodediscovery", &setallowlannodediscovery, {"enabled"} },
+    { "network",            "setupnpportmapping",     &setupnpportmapping,     {"enabled"} },
     { "network",            "getnodeaddresses",       &getnodeaddresses,       {"count"} },
+    { "network",            "reservefastsyncblock",   &reservefastsyncblock,   {"action", "nodeid", "height_or_hash"} },
     { "hidden",             "addconnection",          &addconnection,          {"address", "connection_type"} },
     { "hidden",             "addpeeraddress",         &addpeeraddress,         {"address", "port"} },
 };
