@@ -11,6 +11,13 @@ RPC, policy) is kept at source parity with the
 26.6.8l line — while this repository ships the classic Qt Widgets desktop client and the
 Linux/Windows CI pipeline.
 
+> **Client status:** `defcoin-qt`, the classic Qt Widgets wallet, is in
+> **maintenance mode** — it continues to build and receive fixes, but no new
+> features. It remains the conservative fallback until the modern
+> [Defcoin Core Nu](https://github.com/defcoincore/Defcoin-Core-Nu) desktop
+> client ships on all three platforms and exits alpha. `defcoind` and the
+> other command-line tools are fully maintained.
+
 - Website: https://www.defcoin.io
 - Repository: https://github.com/packetloss404/DefCoinCore
 - Historical Defcoin source: https://github.com/mspicer/defcoin
