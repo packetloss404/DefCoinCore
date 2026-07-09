@@ -1,5 +1,5 @@
-Defcoin Core 2.0.0
-==================
+Defcoin Core 26.6.8l
+====================
 
 [![Build Status](https://github.com/packetloss404/DefCoinCore/actions/workflows/build.yml/badge.svg)](https://github.com/packetloss404/DefCoinCore/actions)
 
@@ -183,7 +183,7 @@ text and [COPYING.md](COPYING.md) for a short project-specific licensing note.
 Credits
 -------
 
-Defcoin Core 2.0.0 builds on work from:
+Defcoin Core builds on work from:
 
 - [Defcoin](https://github.com/mspicer/defcoin)
 - [Defcoin Core Nu](https://github.com/defcoincore/Defcoin-Core-Nu)
