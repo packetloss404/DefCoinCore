@@ -5,7 +5,11 @@ Defcoin Core 2.0.0
 
 Defcoin Core is the reference full node and wallet implementation for the Defcoin network.
 This tree is based on Litecoin 0.21.x with selected security backports, while preserving the
-Defcoin mainnet rules used by the existing chain.
+Defcoin mainnet rules used by the existing chain. The non-GUI daemon (consensus, net, wallet,
+RPC, policy) is kept at source parity with the
+[Defcoin Core Nu](https://github.com/defcoincore/Defcoin-Core-Nu) backend — currently the
+26.6.8l line — while this repository ships the classic Qt Widgets desktop client and the
+Linux/Windows CI pipeline.
 
 - Website: https://www.defcoin.io
 - Repository: https://github.com/packetloss404/DefCoinCore
@@ -20,19 +24,46 @@ Key Network Facts
 - Subsidy halving interval: 840,000 blocks
 - Initial block reward: 50 DFC
 
-Important Compatibility Notes
------------------------------
+Consensus Activation Heights (Mainnet)
+--------------------------------------
 
-This branch intentionally keeps Defcoin mainnet aligned with the historical chain rather than
-blindly enabling all newer Litecoin features.
+Defcoin mainnet follows the historical Defcoin v1.0.x softfork boundaries. These heights are
+long past; they describe rules that are already active on the existing chain, not new
+deployments. They have been verified against the live network by a full from-scratch initial
+block download with this client.
 
-- Mainnet does not treat SegWit, CSV, CLTV, BIP66, Taproot, or MWEB as active consensus features.
-- Use legacy Base58 addresses on mainnet. Do not assume Bech32 or P2SH-SegWit compatibility.
-- Descriptor wallet plumbing exists in the tree, but legacy wallets remain the default and GUI
-  descriptor-wallet creation is not enabled.
-- PSBT workflows are available, but dedicated external-signer integration is not documented as a
-  supported Defcoin feature in this release.
-- `-signet` is not currently supported in this branch.
+| Rule | Active since height |
+|------|--------------------|
+| BIP34 (height in coinbase) | 828,326 |
+| BIP65 (CLTV) / BIP66 (strict DER) | 1,828,326 |
+| CSV (BIP68/112/113) | 903,168 |
+| SegWit (BIP141/143/147) | 903,168 |
+
+The following inherited Litecoin features are **not** active Defcoin mainnet consensus
+features: Taproot, MWEB, Signet. Source paths and RPC fields for them may exist because they
+are part of the upstream codebase; their presence does not mean they are active.
+
+Wallet guidance: legacy Base58 addresses remain the widely supported default on mainnet.
+SegWit is active at the consensus level (bech32 HRP `dfc`), but ecosystem support (pools,
+explorers, services) for spending to non-legacy address types varies — verify the receiving
+side before relying on it. Descriptor wallet plumbing exists in the tree, but legacy wallets
+remain the default. PSBT workflows are available; dedicated external-signer integration is
+not a documented Defcoin feature in this release. `-signet` is not currently supported.
+
+P2P Message-Start Migration
+---------------------------
+
+Defcoin supports two mainnet P2P message starts during the network's magic migration window:
+
+- Defcoin-specific magic: `defc014e` (preferred)
+- Legacy Litecoin-compatible magic: `fbc0b6db`
+
+Compatibility mode accepts both (`-acceptlegacymagic`, default on). This is a transport-level
+network isolation improvement, not a blockchain fork; it reduces socket and address-table
+pollution from unrelated Litecoin-family peers. The wider network plans to default to
+Defcoin-only magic starting **August 1, 2026** — operators of long-running legacy (v1.x)
+nodes should upgrade before then. Peer user agents must begin with `/Defcoin` to be accepted
+for address gossip.
 
 Network Information
 -------------------
@@ -62,6 +93,11 @@ Quick headless build on Unix-like systems:
 make
 ```
 
+On Debian/Ubuntu the daemon build needs (beyond the usual autotools/boost/libevent set)
+`libssl-dev`, `libfmt-dev`, `libsqlite3-dev`, and Berkeley DB (use
+`--with-incompatible-bdb` for a quick local build; release wallets should be built against
+BDB 4.8 via `depends/` for portability).
+
 If you want `defcoin-qt`, install the Qt dependencies described in the platform build notes first.
 
 Binary Names
@@ -84,6 +120,12 @@ Before upgrading from older Defcoin releases:
 4. Install the new binaries.
 5. Expect the first startup to take longer while wallet and chain state are checked, rescanned, or reindexed as needed.
 6. On pruned nodes, a manual `-reindex` may still be required in some upgrade paths.
+
+Data directories that stored post-SegWit-activation blocks without witness data (downloaded
+by non-witness-aware builds) can be repaired in place: run once with
+`-repairwitnessfromheight=<height>` to rewind from the first stripped block body and
+redownload clean blocks from witness-capable peers. This is block data repair, not a wallet
+rescan.
 
 Default data directories:
 
@@ -115,6 +157,8 @@ New Contributors Start Here
 3. Run the smoke-test commands in the testing section above.
 4. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 5. Review [recommendations.md](recommendations.md) for the current codebase and docs follow-up list.
+   (Note: parts of that review predate the consensus-height correction described above; where
+   it says SegWit-style features are not active on mainnet, this README is authoritative.)
 
 Project Status
 --------------
@@ -135,5 +179,6 @@ Credits
 Defcoin Core 2.0.0 builds on work from:
 
 - [Defcoin](https://github.com/mspicer/defcoin)
+- [Defcoin Core Nu](https://github.com/defcoincore/Defcoin-Core-Nu)
 - [Litecoin Core](https://github.com/litecoin-project/litecoin)
 - [Bitcoin Core](https://github.com/bitcoin/bitcoin)
