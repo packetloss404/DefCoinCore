@@ -62,5 +62,4 @@ Windows | `%APPDATA%\Defcoin\` | `C:\Users\username\AppData\Roaming\Defcoin\defc
 Linux | `$HOME/.defcoin/` | `/home/username/.defcoin/defcoin.conf`
 macOS | `$HOME/Library/Application Support/Defcoin/` | `/Users/username/Library/Application Support/Defcoin/defcoin.conf`
 
-You can find an example `defcoin.conf` template in [share/examples/litecoin.conf](../share/examples/litecoin.conf).
-The filename is inherited from upstream, but the contents are Defcoin-specific.
+You can find an example `defcoin.conf` template in [share/examples/defcoin.conf](../share/examples/defcoin.conf).

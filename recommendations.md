@@ -17,7 +17,7 @@ What Was Corrected In This Pass
 - Added `COPYING.md` as a short licensing explainer while keeping `COPYING` as the canonical text.
 - Tightened `.gitignore` for modern local/dev artifacts and extra MSVC state.
 - Fixed a few high-signal documentation mismatches in `doc/README.md`, `doc/README_windows.txt`,
-  `doc/TESTNET_GUIDE.md`, `doc/files.md`, `doc/bitcoin-conf.md`, and `share/examples/litecoin.conf`.
+  `doc/TESTNET_GUIDE.md`, `doc/files.md`, `doc/bitcoin-conf.md`, and `share/examples/defcoin.conf`.
 
 Highest-Priority Follow-Ups
 ---------------------------
@@ -34,9 +34,10 @@ Highest-Priority Follow-Ups
    - Either implement signet properly or remove/disable it and scrub user-facing references.
 
 3. Align wallet defaults with Defcoin mainnet policy.
-   - Mainnet documentation correctly warns that SegWit-style features are not active, but wallet,
-     RPC, and GUI defaults still expose inherited Bech32 / P2SH-SegWit behaviors in places.
-   - Review address defaults, help text, and user-visible warnings before calling those paths supported.
+   - SegWit is active on Defcoin mainnet (chainparams.cpp: `SegwitHeight = 903168`), so Bech32 /
+     P2SH-SegWit address paths are legitimately supported rather than inactive.
+   - Review address defaults, help text, and user-visible messaging so they consistently reflect
+     that SegWit is active, rather than warning it is unavailable.
 
 4. Finish the test-framework rename.
    - Large parts of the test harness and previous-release tooling still look for `litecoind`,
