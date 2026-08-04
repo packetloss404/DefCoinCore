@@ -1,3 +1,9 @@
+> **Status: upstream archival reference.** This file is the
+> upstream Litecoin Core 0.21.1 release notes, retained for historical
+> context. It is **not** a Defcoin Core release. For Defcoin Core
+> release notes see `doc/release-notes.md` (current) and
+> `doc/release-notes/` (per-release archive).
+
 0.21.1 Release Notes
 ====================
 

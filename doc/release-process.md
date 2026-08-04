@@ -1,12 +1,20 @@
 Release Process
 ====================
 
+> **Note:** This document was inherited from the upstream Litecoin Core
+> release process and adapted for Defcoin Core. The general workflow is
+> the same; project names, repository URLs, binary names, and the final
+> publication endpoints have been retargeted at Defcoin Core. Sections
+> that still describe upstream team conventions (translations, snap
+> packaging on Launchpad, etc.) are kept here as a starting point — adjust
+> to match the Defcoin Core maintainer setup before relying on them.
+
 ## Branch updates
 
 ### Before every release candidate
 
-* Update translations (ping wumpus on IRC) see [translation_process.md](https://github.com/bitcoin/bitcoin/blob/master/doc/translation_process.md#synchronising-translations).
-* Update manpages, see [gen-manpages.sh](https://github.com/bitcoin/bitcoin/blob/master/contrib/devtools/README.md#gen-manpagessh).
+* Update translations (the [translation process](translation_process.md) describes the synchronisation flow; reach out to a Defcoin Core maintainer if you need an owner for this).
+* Update manpages, see [gen-manpages.sh](../contrib/devtools/gen-manpages.sh).
 * Update release candidate version in `configure.ac` (`CLIENT_VERSION_RC`).
 
 ### Before every major and minor release
@@ -19,18 +27,17 @@ Release Process
 
 * On both the master branch and the new release branch:
   - update `CLIENT_VERSION_MINOR` in [`configure.ac`](../configure.ac)
-  - update `CLIENT_VERSION_MINOR`, `PACKAGE_VERSION`, and `PACKAGE_STRING` in [`build_msvc/bitcoin_config.h`](/build_msvc/bitcoin_config.h)
-* On the new release branch in [`configure.ac`](../configure.ac) and [`build_msvc/bitcoin_config.h`](/build_msvc/bitcoin_config.h) (see [this commit](https://github.com/bitcoin/bitcoin/commit/742f7dd)):
+  - update `CLIENT_VERSION_MINOR`, `PACKAGE_VERSION`, and `PACKAGE_STRING` in `build_msvc/defcoin_config.h` (the upstream-style file is currently still tracked under its old name; see `recommendations.md` for the rename plan)
+* On the new release branch in [`configure.ac`](../configure.ac) and `build_msvc/defcoin_config.h`:
   - set `CLIENT_VERSION_REVISION` to `0`
   - set `CLIENT_VERSION_IS_RELEASE` to `true`
 
 #### Before branch-off
 
-* Update hardcoded [seeds](/contrib/seeds/README.md), see [this pull request](https://github.com/bitcoin/bitcoin/pull/7415) for an example.
-* Update [`src/chainparams.cpp`](/src/chainparams.cpp) m_assumed_blockchain_size and m_assumed_chain_state_size with the current size plus some overhead (see [this](#how-to-calculate-assumed-blockchain-and-chain-state-size) for information on how to calculate them).
-* Update [`src/chainparams.cpp`](/src/chainparams.cpp) chainTxData with statistics about the transaction count and rate. Use the output of the `getchaintxstats` RPC, see
-  [this pull request](https://github.com/bitcoin/bitcoin/pull/20263) for an example. Reviewers can verify the results by running `getchaintxstats <window_block_count> <window_final_block_hash>` with the `window_block_count` and `window_final_block_hash` from your output.
-* Update `src/chainparams.cpp` nMinimumChainWork and defaultAssumeValid (and the block height comment) with information from the `getblockheader` (and `getblockhash`) RPCs.
+* Update hardcoded [seeds](../contrib/seeds/README.md).
+* Update [`src/chainparams.cpp`](../src/chainparams.cpp) `m_assumed_blockchain_size` and `m_assumed_chain_state_size` with the current size plus some overhead (see [this](#how-to-calculate-assumed-blockchain-and-chain-state-size) for information on how to calculate them).
+* Update [`src/chainparams.cpp`](../src/chainparams.cpp) `chainTxData` with statistics about the transaction count and rate. Use the output of the `getchaintxstats` RPC.
+* Update `src/chainparams.cpp` `nMinimumChainWork` and `defaultAssumeValid` (and the block height comment) with information from the `getblockheader` (and `getblockhash`) RPCs.
   - The selected value must not be orphaned so it may be useful to set the value two blocks back from the tip.
   - Testnet should be set some tens of thousands back from the tip due to reorgs there.
   - This update should be reviewed with a reindex-chainstate with assumevalid=0 to catch any defect
@@ -44,7 +51,7 @@ Release Process
 #### After branch-off (on the major release branch)
 
 - Update the versions.
-- Create a pinned meta-issue for testing the release candidate (see [this issue](https://github.com/bitcoin/bitcoin/issues/17079) for an example) and provide a link to it in the release announcements where useful.
+- Create a pinned meta-issue for testing the release candidate and provide a link to it in the release announcements where useful.
 
 #### Before final release
 
@@ -56,56 +63,44 @@ Release Process
 
 ### First time / New builders
 
-If you're using the automated script (found in [contrib/gitian-build.py](/contrib/gitian-build.py)), then at this point you should run it with the "--setup" command. Otherwise ignore this.
+If you're using the automated script (found in `contrib/gitian-build.py` if it has been added to this tree; see `doc/gitian-building.md` for upstream guidance), then at this point you should run it with the "--setup" command. Otherwise ignore this.
 
 Check out the source code in the following directory hierarchy.
 
     cd /path/to/your/toplevel/build
-    git clone https://github.com/litecoin-project/gitian.sigs.ltc.git
-    git clone https://github.com/litecoin-project/litecoin-detached-sigs.git
     git clone https://github.com/devrandom/gitian-builder.git
-    git clone https://github.com/litecoin-project/litecoin.git
+    git clone https://github.com/packetloss404/DefCoinCore.git
 
-### Litecoin maintainers/release engineers, suggestion for writing release notes
+Signatures and detached-signature repos for Defcoin Core will be added
+once a Gitian-based release pipeline is set up. Until then, signed
+binaries are produced via a manual process — see the project owner for
+the current procedure.
+
+### Defcoin Core maintainers/release engineers, suggestion for writing release notes
 
 Write the release notes. `git shortlog` helps a lot, for example:
 
-    git shortlog --no-merges v(current version, e.g. 0.19.2)..v(new version, e.g. 0.20.0)
-
-(or ping @wumpus on IRC, he has specific tooling to generate the list of merged pulls
-and sort them into categories based on labels).
+    git shortlog --no-merges v(current version, e.g. 26.6.7)..v(new version, e.g. 26.6.8)
 
 Generate list of authors:
 
-    git log --format='- %aN' v(current version, e.g. 0.20.0)..v(new version, e.g. 0.20.1) | sort -fiu
+    git log --format='- %aN' v(current version, e.g. 26.6.7)..v(new version, e.g. 26.6.8) | sort -fiu
 
 Tag the version (or release candidate) in git:
 
-    git tag -s v(new version, e.g. 0.20.0)
+    git tag -s v(new version, e.g. 26.6.8)
 
 ### Setup and perform Gitian builds
 
-If you're using the automated script (found in [contrib/gitian-build.py](/contrib/gitian-build.py)), then at this point you should run it with the "--build" command. Otherwise ignore this.
+If you're using the automated script (see the "First time / New builders" note above), then at this point you should run it with the "--build" command. Otherwise ignore this.
 
 Setup Gitian descriptors:
 
-    pushd ./litecoin
+    pushd ./DefCoinCore
     export SIGNER="(your Gitian key, ie bluematt, sipa, etc)"
-    export VERSION=(new version, e.g. 0.20.0)
+    export VERSION=(new version, e.g. 26.6.8)
     git fetch
     git checkout v${VERSION}
-    popd
-
-Ensure your gitian.sigs.ltc are up-to-date if you wish to gverify your builds against other Gitian signatures.
-
-    pushd ./gitian.sigs.ltc
-    git pull
-    popd
-
-Ensure gitian-builder is up-to-date:
-
-    pushd ./gitian-builder
-    git pull
     popd
 
 ### Fetch and create inputs: (first time, or when dependency versions change)
@@ -116,16 +111,16 @@ Ensure gitian-builder is up-to-date:
     echo '5a60e0a4b3e0b4d655317b2f12a810211c50242138322b16e7e01c6fbb89d92f inputs/osslsigncode-2.0.tar.gz' | sha256sum -c
     popd
 
-Create the macOS SDK tarball, see the [macdeploy instructions](/contrib/macdeploy/README.md#deterministic-macos-dmg-notes) for details, and copy it into the inputs directory.
+Create the macOS SDK tarball, see the [macdeploy instructions](../contrib/macdeploy/README.md#deterministic-macos-dmg-notes) for details, and copy it into the inputs directory.
 
 ### Optional: Seed the Gitian sources cache and offline git repositories
 
 NOTE: Gitian is sometimes unable to download files. If you have errors, try the step below.
 
-By default, Gitian will fetch source files as needed. To cache them ahead of time, make sure you have checked out the tag you want to build in litecoin, then:
+By default, Gitian will fetch source files as needed. To cache them ahead of time, make sure you have checked out the tag you want to build in DefCoinCore, then:
 
     pushd ./gitian-builder
-    make -C ../litecoin/depends download SOURCES_PATH=`pwd`/cache/common
+    make -C ../DefCoinCore/depends download SOURCES_PATH=`pwd`/cache/common
     popd
 
 Only missing files will be fetched, so this is safe to re-run for each build.
@@ -133,57 +128,57 @@ Only missing files will be fetched, so this is safe to re-run for each build.
 NOTE: Offline builds must use the --url flag to ensure Gitian fetches only from local URLs. For example:
 
     pushd ./gitian-builder
-    ./bin/gbuild --url litecoin=/path/to/litecoin,signature=/path/to/sigs {rest of arguments}
+    ./bin/gbuild --url DefCoinCore=/path/to/DefCoinCore,signature=/path/to/sigs {rest of arguments}
     popd
 
 The gbuild invocations below <b>DO NOT DO THIS</b> by default.
 
-### Build and sign Litecoin Core for Linux, Windows, and macOS:
+### Build and sign Defcoin Core for Linux, Windows, and macOS:
 
     export GITIAN_THREADS=2
     export GITIAN_MEMORY=3000
-    
+
     pushd ./gitian-builder
-    ./bin/gbuild --num-make $GITIAN_THREADS --memory $GITIAN_MEMORY --commit litecoin=v${VERSION} ../litecoin/contrib/gitian-descriptors/gitian-linux.yml
-    ./bin/gsign --signer "$SIGNER" --release ${VERSION}-linux --destination ../gitian.sigs.ltc/ ../litecoin/contrib/gitian-descriptors/gitian-linux.yml
-    mv build/out/litecoin-*.tar.gz build/out/src/litecoin-*.tar.gz ../
+    ./bin/gbuild --num-make $GITIAN_THREADS --memory $GITIAN_MEMORY --commit DefCoinCore=v${VERSION} ../DefCoinCore/contrib/gitian-descriptors/gitian-linux.yml
+    ./bin/gsign --signer "$SIGNER" --release ${VERSION}-linux --destination ../gitian.sigs.dfc/ ../DefCoinCore/contrib/gitian-descriptors/gitian-linux.yml
+    mv build/out/defcoin-*.tar.gz build/out/src/defcoin-*.tar.gz ../
 
-    ./bin/gbuild --num-make $GITIAN_THREADS --memory $GITIAN_MEMORY --commit litecoin=v${VERSION} ../litecoin/contrib/gitian-descriptors/gitian-win.yml
-    ./bin/gsign --signer "$SIGNER" --release ${VERSION}-win-unsigned --destination ../gitian.sigs.ltc/ ../litecoin/contrib/gitian-descriptors/gitian-win.yml
-    mv build/out/litecoin-*-win-unsigned.tar.gz inputs/litecoin-win-unsigned.tar.gz
-    mv build/out/litecoin-*.zip build/out/litecoin-*.exe ../
+    ./bin/gbuild --num-make $GITIAN_THREADS --memory $GITIAN_MEMORY --commit DefCoinCore=v${VERSION} ../DefCoinCore/contrib/gitian-descriptors/gitian-win.yml
+    ./bin/gsign --signer "$SIGNER" --release ${VERSION}-win-unsigned --destination ../gitian.sigs.dfc/ ../DefCoinCore/contrib/gitian-descriptors/gitian-win.yml
+    mv build/out/defcoin-*-win-unsigned.tar.gz inputs/defcoin-win-unsigned.tar.gz
+    mv build/out/defcoin-*.zip build/out/defcoin-*.exe ../
 
-    ./bin/gbuild --num-make $GITIAN_THREADS --memory $GITIAN_MEMORY --commit litecoin=v${VERSION} ../litecoin/contrib/gitian-descriptors/gitian-osx.yml
-    ./bin/gsign --signer "$SIGNER" --release ${VERSION}-osx-unsigned --destination ../gitian.sigs.ltc/ ../litecoin/contrib/gitian-descriptors/gitian-osx.yml
-    mv build/out/litecoin-*-osx-unsigned.tar.gz inputs/litecoin-osx-unsigned.tar.gz
-    mv build/out/litecoin-*.tar.gz build/out/litecoin-*.dmg ../
+    ./bin/gbuild --num-make $GITIAN_THREADS --memory $GITIAN_MEMORY --commit DefCoinCore=v${VERSION} ../DefCoinCore/contrib/gitian-descriptors/gitian-osx.yml
+    ./bin/gsign --signer "$SIGNER" --release ${VERSION}-osx-unsigned --destination ../gitian.sigs.dfc/ ../DefCoinCore/contrib/gitian-descriptors/gitian-osx.yml
+    mv build/out/defcoin-*-osx-unsigned.tar.gz inputs/defcoin-osx-unsigned.tar.gz
+    mv build/out/defcoin-*.tar.gz build/out/defcoin-*.dmg ../
     popd
 
 Build output expected:
 
-  1. source tarball (`litecoin-${VERSION}.tar.gz`)
-  2. linux 32-bit and 64-bit dist tarballs (`litecoin-${VERSION}-linux[32|64].tar.gz`)
-  3. windows 32-bit and 64-bit unsigned installers and dist zips (`litecoin-${VERSION}-win[32|64]-setup-unsigned.exe`, `litecoin-${VERSION}-win[32|64].zip`)
-  4. macOS unsigned installer and dist tarball (`litecoin-${VERSION}-osx-unsigned.dmg`, `litecoin-${VERSION}-osx64.tar.gz`)
-  5. Gitian signatures (in `gitian.sigs.ltc/${VERSION}-<linux|{win,osx}-unsigned>/(your Gitian key)/`)
+  1. source tarball (`defcoin-${VERSION}.tar.gz`)
+  2. linux 32-bit and 64-bit dist tarballs (`defcoin-${VERSION}-linux[32|64].tar.gz`)
+  3. windows 32-bit and 64-bit unsigned installers and dist zips (`defcoin-${VERSION}-win[32|64]-setup-unsigned.exe`, `defcoin-${VERSION}-win[32|64].zip`)
+  4. macOS unsigned installer and dist tarball (`defcoin-${VERSION}-osx-unsigned.dmg`, `defcoin-${VERSION}-osx64.tar.gz`)
+  5. Gitian signatures (in `gitian.sigs.dfc/${VERSION}-<linux|{win,osx}-unsigned>/(your Gitian key)/`)
 
 ### Verify other gitian builders signatures to your own. (Optional)
 
-Add other gitian builders keys to your gpg keyring, and/or refresh keys: See `../litecoin/contrib/gitian-keys/README.md`.
+Add other gitian builders keys to your gpg keyring, and/or refresh keys: See `../DefCoinCore/contrib/gitian-keys/README.md`.
 
 Verify the signatures
 
     pushd ./gitian-builder
-    ./bin/gverify -v -d ../gitian.sigs.ltc/ -r ${VERSION}-linux ../litecoin/contrib/gitian-descriptors/gitian-linux.yml
-    ./bin/gverify -v -d ../gitian.sigs.ltc/ -r ${VERSION}-win-unsigned ../litecoin/contrib/gitian-descriptors/gitian-win.yml
-    ./bin/gverify -v -d ../gitian.sigs.ltc/ -r ${VERSION}-osx-unsigned ../litecoin/contrib/gitian-descriptors/gitian-osx.yml
+    ./bin/gverify -v -d ../gitian.sigs.dfc/ -r ${VERSION}-linux ../DefCoinCore/contrib/gitian-descriptors/gitian-linux.yml
+    ./bin/gverify -v -d ../gitian.sigs.dfc/ -r ${VERSION}-win-unsigned ../DefCoinCore/contrib/gitian-descriptors/gitian-win.yml
+    ./bin/gverify -v -d ../gitian.sigs.dfc/ -r ${VERSION}-osx-unsigned ../DefCoinCore/contrib/gitian-descriptors/gitian-osx.yml
     popd
 
 ### Next steps:
 
-Commit your signature to gitian.sigs.ltc:
+Commit your signature to gitian.sigs.dfc:
 
-    pushd gitian.sigs.ltc
+    pushd gitian.sigs.dfc
     git add ${VERSION}-linux/"${SIGNER}"
     git add ${VERSION}-win-unsigned/"${SIGNER}"
     git add ${VERSION}-osx-unsigned/"${SIGNER}"
@@ -197,11 +192,11 @@ Codesigner only: Create Windows/macOS detached signatures:
 
 Codesigner only: Sign the macOS binary:
 
-    transfer litecoin-osx-unsigned.tar.gz to macOS for signing
-    tar xf litecoin-osx-unsigned.tar.gz
+    transfer defcoin-osx-unsigned.tar.gz to macOS for signing
+    tar xf defcoin-osx-unsigned.tar.gz
     ./detached-sig-create.sh -s "Key ID"
     Enter the keychain password and authorize the signature
-    
+
     Now a manual deterministic disk image (dmg) creation is required.
 
     First time setup for codesigner, requires creation of app-specific-password via Apple ID website.
@@ -215,7 +210,7 @@ Codesigner only: Sign the macOS binary:
 
     Notarize the disk image:
 
-    $   xcrun altool --notarize-app --primary-bundle-id "org.litecoin.Litecoin-Qt" -u "<apple-id-email>" -p "@keychain:<apple-id-notarisation-app-specific-password>" --asc-provider <team-id-shortcode> -t osx -f litecoin-${VERSION}-osx.dmg
+    $   xcrun altool --notarize-app --primary-bundle-id "org.defcoin.Defcoin-Qt" -u "<apple-id-email>" -p "@keychain:<apple-id-notarisation-app-specific-password>" --asc-provider <team-id-shortcode> -t osx -f defcoin-${VERSION}-osx.dmg
 
     The notarization takes a few minutes. Check the status:
 
@@ -227,24 +222,24 @@ Codesigner only: Sign the macOS binary:
 
     Staple the notarization ticket onto the application
 
-    $   xcrun stapler staple dist/Litecoin-Qt.app
+    $   xcrun stapler staple dist/Defcoin-Qt.app
 
 Codesigner only: Sign the windows binaries:
 
-    tar xf litecoin-win-unsigned.tar.gz
+    tar xf defcoin-win-unsigned.tar.gz
     ./detached-sig-create.sh -key /path/to/codesign.key
     Enter the passphrase for the key when prompted
     signature-win.tar.gz will be created
 
 Codesigner only: Commit the detached codesign payloads:
 
-    cd ~/litecoin-detached-sigs
+    cd ~/defcoin-detached-sigs
     #checkout the appropriate branch for this release series
     rm -rf *
     tar xf signature-osx.tar.gz
     tar xf signature-win.tar.gz
     #copy the notarization ticket to detached-sigs repo
-    cp dist/Litecoin-Qt.app/Contents/CodeResources osx/dist/Litecoin-Qt.app/Contents/
+    cp dist/Defcoin-Qt.app/Contents/CodeResources osx/dist/Defcoin-Qt.app/Contents/
     git add -A
     git commit -m "point to ${VERSION}"
     git tag -s v${VERSION} HEAD
@@ -253,33 +248,33 @@ Codesigner only: Commit the detached codesign payloads:
 Non-codesigners: wait for Windows/macOS detached signatures:
 
 - Once the Windows/macOS builds each have 3 matching signatures, they will be signed with their respective release keys.
-- Detached signatures will then be committed to the [litecoin-detached-sigs](https://github.com/litecoin-project/litecoin-detached-sigs) repository, which can be combined with the unsigned apps to create signed binaries.
+- Detached signatures will then be committed to the defcoin-detached-sigs repository, which can be combined with the unsigned apps to create signed binaries.
 
 Create (and optionally verify) the signed macOS binary:
 
     pushd ./gitian-builder
-    ./bin/gbuild -i --commit signature=v${VERSION} ../litecoin/contrib/gitian-descriptors/gitian-osx-signer.yml
-    ./bin/gsign --signer "$SIGNER" --release ${VERSION}-osx-signed --destination ../gitian.sigs.ltc/ ../litecoin/contrib/gitian-descriptors/gitian-osx-signer.yml
-    ./bin/gverify -v -d ../gitian.sigs.ltc/ -r ${VERSION}-osx-signed ../litecoin/contrib/gitian-descriptors/gitian-osx-signer.yml
-    mv build/out/litecoin-osx-signed.dmg ../litecoin-${VERSION}-osx.dmg
+    ./bin/gbuild -i --commit signature=v${VERSION} ../DefCoinCore/contrib/gitian-descriptors/gitian-osx-signer.yml
+    ./bin/gsign --signer "$SIGNER" --release ${VERSION}-osx-signed --destination ../gitian.sigs.dfc/ ../DefCoinCore/contrib/gitian-descriptors/gitian-osx-signer.yml
+    ./bin/gverify -v -d ../gitian.sigs.dfc/ -r ${VERSION}-osx-signed ../DefCoinCore/contrib/gitian-descriptors/gitian-osx-signer.yml
+    mv build/out/defcoin-osx-signed.dmg ../defcoin-${VERSION}-osx.dmg
     popd
 
 Create (and optionally verify) the signed Windows binaries:
 
     pushd ./gitian-builder
-    ./bin/gbuild -i --commit signature=v${VERSION} ../litecoin/contrib/gitian-descriptors/gitian-win-signer.yml
-    ./bin/gsign --signer "$SIGNER" --release ${VERSION}-win-signed --destination ../gitian.sigs/ ../litecoin/contrib/gitian-descriptors/gitian-win-signer.yml
-    ./bin/gverify -v -d ../gitian.sigs/ -r ${VERSION}-win-signed ../litecoin/contrib/gitian-descriptors/gitian-win-signer.yml
-    mv build/out/litecoin-*win64-setup.exe ../litecoin-${VERSION}-win64-setup.exe
+    ./bin/gbuild -i --commit signature=v${VERSION} ../DefCoinCore/contrib/gitian-descriptors/gitian-win-signer.yml
+    ./bin/gsign --signer "$SIGNER" --release ${VERSION}-win-signed --destination ../gitian.sigs.dfc/ ../DefCoinCore/contrib/gitian-descriptors/gitian-win-signer.yml
+    ./bin/gverify -v -d ../gitian.sigs.dfc/ -r ${VERSION}-win-signed ../DefCoinCore/contrib/gitian-descriptors/gitian-win-signer.yml
+    mv build/out/defcoin-*win64-setup.exe ../defcoin-${VERSION}-win64-setup.exe
     popd
 
 Commit your signature for the signed macOS/Windows binaries:
 
-    pushd gitian.sigs.ltc
+    pushd gitian.sigs.dfc
     git add ${VERSION}-osx-signed/"${SIGNER}"
     git add ${VERSION}-win-signed/"${SIGNER}"
     git commit -m "Add ${SIGNER} ${VERSION} signed binaries signatures"
-    git push  # Assuming you can push to the gitian.sigs.ltc tree
+    git push  # Assuming you can push to the gitian.sigs.dfc tree
     popd
 
 ### After 3 or more people have gitian-built and their results match:
@@ -292,21 +287,21 @@ sha256sum * > SHA256SUMS
 
 The list of files should be:
 ```
-litecoin-${VERSION}-aarch64-linux-gnu.tar.gz
-litecoin-${VERSION}-arm-linux-gnueabihf.tar.gz
-litecoin-${VERSION}-riscv64-linux-gnu.tar.gz
-litecoin-${VERSION}-x86_64-linux-gnu.tar.gz
-litecoin-${VERSION}-osx64.tar.gz
-litecoin-${VERSION}-osx.dmg
-litecoin-${VERSION}.tar.gz
-litecoin-${VERSION}-win64-setup.exe
-litecoin-${VERSION}-win64.zip
+defcoin-${VERSION}-aarch64-linux-gnu.tar.gz
+defcoin-${VERSION}-arm-linux-gnueabihf.tar.gz
+defcoin-${VERSION}-riscv64-linux-gnu.tar.gz
+defcoin-${VERSION}-x86_64-linux-gnu.tar.gz
+defcoin-${VERSION}-osx64.tar.gz
+defcoin-${VERSION}-osx.dmg
+defcoin-${VERSION}.tar.gz
+defcoin-${VERSION}-win64-setup.exe
+defcoin-${VERSION}-win64.zip
 ```
 The `*-debug*` files generated by the gitian build contain debug symbols
 for troubleshooting by developers. It is assumed that anyone that is interested
 in debugging can run gitian to generate the files for themselves. To avoid
 end-user confusion about which file to pick, as well as save storage
-space *do not upload these to the litecoin.org server, nor put them in the torrent*.
+space *do not upload these to the defcoin distribution server, nor put them in the torrent*.
 
 - GPG-sign it, delete the unsigned file:
 ```
@@ -316,57 +311,22 @@ rm SHA256SUMS
 (the digest algorithm is forced to sha256 to avoid confusion of the `Hash:` header that GPG adds with the SHA256 used for the files)
 Note: check that SHA256SUMS itself doesn't end up in SHA256SUMS, which is a spurious/nonsensical entry.
 
-- Upload zips and installers, as well as `SHA256SUMS.asc` from last step, to the litecoin.org server.
+- Upload zips and installers, as well as `SHA256SUMS.asc` from last step, to the defcoin distribution server.
 
-- Update litecoin.org version
+- Update the defcoin distribution version metadata.
 
 - Update other repositories and websites for new version
 
-  - Update title of #litecoin and #litecoin-dev on Freenode IRC
+  - Update title of the project IRC channels on Libera.Chat
+    (#defcoin, #defcoin-dev) — coordinate with the channel owners.
 
-  - bitcoincore.org maintained versions update:
-    [table](https://github.com/bitcoin-core/bitcoincore.org/commits/master/_includes/posts/maintenance-table.md)
+  - Update any package-management metadata for the project (e.g.
+    Flatpak, Snap, AUR).
 
-  - bitcoincore.org RPC documentation update
+  - Archive release notes for the new version to `doc/release-notes/`
+    (branch `master` and branch of the release)
 
-  - Update packaging repo
-
-      - Push the flatpak to flathub, e.g. https://github.com/flathub/org.bitcoincore.bitcoin-qt/pull/2
-
-      - Push the latest version to master (if applicable), e.g. https://github.com/bitcoin-core/packaging/pull/32
-
-      - Create a new branch for the major release "0.xx" from master (used to build the snap package) and request the
-        track (if applicable), e.g. https://forum.snapcraft.io/t/track-request-for-bitcoin-core-snap/10112/7
-
-      - Notify MarcoFalke so that he can start building the snap package
-
-        - https://code.launchpad.net/~bitcoin-core/bitcoin-core-snap/+git/packaging (Click "Import Now" to fetch the branch)
-        - https://code.launchpad.net/~bitcoin-core/bitcoin-core-snap/+git/packaging/+ref/0.xx (Click "Create snap package")
-        - Name it "bitcoin-core-snap-0.xx"
-        - Leave owner and series as-is
-        - Select architectures that are compiled via gitian
-        - Leave "automatically build when branch changes" unticked
-        - Tick "automatically upload to store"
-        - Put "bitcoin-core" in the registered store package name field
-        - Tick the "edge" box
-        - Put "0.xx" in the track field
-        - Click "create snap package"
-        - Click "Request builds" for every new release on this branch (after updating the snapcraft.yml in the branch to reflect the latest gitian results)
-        - Promote release on https://snapcraft.io/bitcoin-core/releases if it passes sanity checks
-
-- Announce the release:
-
-  - litecoin-dev mailing list
-
-  - blog.litecoin.org blog post
-
-  - Update title of #litecoin and #litecoin-dev on Freenode IRC
-
-  - Optionally twitter, reddit /r/Litecoin, ... but this will usually sort out itself
-
-  - Archive release notes for the new version to `doc/release-notes/` (branch `master` and branch of the release)
-
-  - Create a [new GitHub release](https://github.com/litecoin-project/litecoin/releases/new) with a link to the archived release notes.
+  - Create a [new GitHub release](https://github.com/packetloss404/DefCoinCore/releases/new) with a link to the archived release notes.
 
   - Celebrate
 
