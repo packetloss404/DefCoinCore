@@ -1,0 +1,33 @@
+# /etc/conf.d/defcoind: config file for /etc/init.d/defcoind
+
+# Config file location
+#DEFCOIND_CONFIGFILE="/etc/defcoin/defcoin.conf"
+
+# What directory to write pidfile to?  (created and owned by $DEFCOIND_USER)
+#DEFCOIND_PIDDIR="/var/run/defcoind"
+
+# What filename to give the pidfile
+#DEFCOIND_PIDFILE="${DEFCOIND_PIDDIR}/defcoind.pid"
+
+# Where to write defcoind data (be mindful that the blockchain is large)
+#DEFCOIND_DATADIR="/var/lib/defcoind"
+
+# User and group to own defcoind process
+#DEFCOIND_USER="defcoin"
+#DEFCOIND_GROUP="defcoin"
+
+# Path to defcoind executable
+#DEFCOIND_BIN="/usr/bin/defcoind"
+
+# Nice value to run defcoind under
+#DEFCOIND_NICE=0
+
+# Additional options (avoid -conf and -datadir, use flags above)
+#DEFCOIND_OPTS=""
+
+# The timeout in seconds OpenRC will wait for defcoind to terminate
+# after a SIGTERM has been raised.
+# Note that this will be mapped as argument to start-stop-daemon's
+# '--retry' option, which means you can specify a retry schedule
+# here. For more information see man 8 start-stop-daemon.
+DEFCOIND_SIGTERM_TIMEOUT=600
