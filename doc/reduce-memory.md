@@ -1,6 +1,12 @@
 # Reduce Memory
 
-There are a few parameters that can be dialed down to reduce the memory usage of `bitcoind`. This can be useful on embedded systems or small VPSes.
+> **Status: inherited from upstream.** This document is the upstream
+> Bitcoin Core / Litecoin Core memory-tuning guide, retained for
+> Defcoin Core. The `dbcache`, `maxmempool`, and related parameters
+> apply unchanged - just substitute `defcoind` / `defcoin.conf` for
+> `bitcoind` / `bitcoin.conf` when reading.
+
+There are a few parameters that can be dialed down to reduce the memory usage of `defcoind`. This can be useful on embedded systems or small VPSes.
 
 ## In-memory caches
 

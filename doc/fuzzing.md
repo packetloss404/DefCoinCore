@@ -1,4 +1,8 @@
-# Fuzzing Litecoin Core using libFuzzer
+# Fuzzing Defcoin Core using libFuzzer
+
+> **Status: inherited from upstream.** The Defcoin Core fuzzer harness
+> is the upstream Litecoin Core / Bitcoin Core libFuzzer setup. The
+> harness and configuration described here apply unchanged.
 
 ## Quickstart guide
 

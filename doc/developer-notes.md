@@ -1,3 +1,11 @@
+> **Status: inherited from upstream.** This document is the upstream
+> Bitcoin Core / Litecoin Core developer-notes set, retained for
+> Defcoin Core. The coding-style and review-process rules described
+> here apply to Defcoin Core unchanged. The currency/identity
+> references are upstream-style and have not been retargeted; treat
+> "Bitcoin Core developer" / "Litecoin Core developer" as "Defcoin Core
+> contributor" in this document.
+
 Developer Notes
 ===============
 

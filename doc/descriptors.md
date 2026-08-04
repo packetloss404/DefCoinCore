@@ -1,4 +1,10 @@
-# Support for Output Descriptors in Litecoin Core
+# Support for Output Descriptors in Defcoin Core
+
+> **Status: inherited from upstream.** Output Descriptors work the same
+> way in Defcoin Core as in upstream Litecoin Core v0.17+. Descriptor
+> wallet plumbing is present in this tree, but **legacy wallets remain
+> the default on Defcoin mainnet** — see the project [README](../README.md)
+> for current wallet guidance.
 
 Since Litecoin Core v0.17, there is support for Output Descriptors. This is a
 simple language which can be used to describe collections of output scripts.

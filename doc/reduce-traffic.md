@@ -1,3 +1,8 @@
+> **Status: inherited from upstream.** This document is the upstream
+> Bitcoin Core / Litecoin Core traffic-tuning guide, retained for
+> Defcoin Core. The block-`filter` and `blocksonly` parameters apply
+> unchanged.
+
 Reduce Traffic
 ==============
 

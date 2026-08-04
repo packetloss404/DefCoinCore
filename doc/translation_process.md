@@ -1,3 +1,11 @@
+> **Status: inherited from upstream.** This document is the upstream
+> Bitcoin Core / Litecoin Core translation-process guide, retained for
+> Defcoin Core. The Transifex / source-string workflow described here
+> applies to Defcoin Core unchanged. Translations for Defcoin Core
+> have not yet been set up under a Defcoin-specific Transifex project
+> - reach out to a Defcoin Core maintainer before starting a new
+> translation effort.
+
 Translations
 ============
 

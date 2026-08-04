@@ -1,6 +1,13 @@
 Dependencies
 ============
 
+> **Status: inherited from upstream.** This is the upstream Litecoin
+> Core dependency table. The set of dependencies and minimum versions
+> listed here apply to Defcoin Core unchanged, except that Defcoin Core
+> additionally requires `libfmt-dev` and `libsqlite3-dev` on
+> Debian/Ubuntu (see [INSTALL.md](../INSTALL.md) and
+> [README.md](../README.md)).
+
 These are the dependencies currently used by Litecoin Core. You can find instructions for installing them in the `build-*.md` file for your platform.
 
 | Dependency | Version used | Minimum required | CVEs | Shared | [Bundled Qt library](https://doc.qt.io/qt-5/configure-options.html#third-party-libraries) |

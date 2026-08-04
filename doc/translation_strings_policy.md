@@ -1,3 +1,8 @@
+> **Status: inherited from upstream.** This document is the upstream
+> Bitcoin Core / Litecoin Core translation-strings policy, retained
+> for Defcoin Core. The wording and capitalization rules apply
+> unchanged.
+
 Translation Strings Policy
 ===========================
 

@@ -1,3 +1,10 @@
+> **Status: inherited from upstream.** This document is the upstream
+> Bitcoin Core / Litecoin Core DNS seed operator policy, retained for
+> Defcoin Core. The policy and operational expectations apply
+> unchanged. Defcoin Core seeds are configured in
+> [src/chainparams.cpp](../src/chainparams.cpp) - see the project
+> [README](../README.md) for the current seed policy.
+
 Expectations for DNS Seed operators
 ====================================
 

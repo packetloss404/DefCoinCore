@@ -1,3 +1,8 @@
+> **Status: inherited from upstream.** This document is the upstream
+> Bitcoin Core / Litecoin Core benchmarking guide, retained for
+> Defcoin Core. The `--bench` workflow and the `bench/` test suite
+> apply unchanged.
+
 Benchmarking
 ============
 

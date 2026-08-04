@@ -1,3 +1,7 @@
+> **Status: inherited from upstream.** This document describes the
+> upstream `libdefcoinconsensus` shared-library interface. The
+> symbol list and ABI described here apply to Defcoin Core unchanged.
+
 Shared Libraries
 ================
 

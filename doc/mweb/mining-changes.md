@@ -1,5 +1,14 @@
 # MWEB - Mining Changes
 
+> **Status: upstream Litecoin Core reference, not active on Defcoin mainnet.**
+> This document is the upstream Litecoin Core MWEB mining-pools guide.
+> **MWEB is not active on Defcoin mainnet** — see the project
+> [README](../../README.md) for the current consensus activation
+> heights. The MWEB source paths and `getblocktemplate` extension
+> described here are inherited from upstream code but are not part of
+> the Defcoin mainnet consensus rules. Pool software targeting
+> Defcoin mainnet does **not** need the MWEB changes below.
+
 Starting with Litecoin Core release v0.21.2, changes have been made to `getblocktemplate` to support mining blocks with MWEB data. `getblocktemplate` does not yet provide consumers control over which MWEB transactions can be included in a block, and instead builds the MWEB and integrating transactions for you. Though changes do need to be made to pool software, those changes should be very minimal.
 
 ### Required Pool Software Changes

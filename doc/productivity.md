@@ -1,3 +1,8 @@
+> **Status: inherited from upstream.** This document is the upstream
+> Bitcoin Core / Litecoin Core productivity-notes set, retained for
+> Defcoin Core. The IDE / editor tips and the `clang-format` /
+> `clang-tidy` workflow described here apply unchanged.
+
 Productivity Notes
 ==================
 

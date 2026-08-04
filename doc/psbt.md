@@ -1,4 +1,11 @@
-# PSBT Howto for Bitcoin Core
+# PSBT Howto for Defcoin Core
+
+> **Status: inherited from upstream.** This document is the upstream
+> Bitcoin Core PSBT how-to, retained as reference for Defcoin Core. The
+> PSBT RPC interface works the same way here. PSBT workflows are
+> available in this release; dedicated external-signer integration is
+> not a documented Defcoin feature — see the project [README](../README.md)
+> for current wallet guidance.
 
 Since Bitcoin Core 0.17, an RPC interface exists for Partially Signed Bitcoin
 Transactions (PSBTs, as specified in

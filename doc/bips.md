@@ -1,3 +1,11 @@
+> **Status: inherited from upstream.** This file tracks the BIPs that
+> the upstream Bitcoin/Litecoin Core lines implement. Defcoin Core
+> inherits the same set on the consensus features active on mainnet
+> (BIP34/65/66/68/112/113/141/143/147 and the BIPs they depend on). It
+> is up-to-date through upstream **v0.21.1**; consensus-activation
+> heights for Defcoin mainnet are listed in the project
+> [README](../README.md).
+
 BIPs that are implemented by Bitcoin Core (up-to-date up to **v0.21.1**):
 
 * [`BIP 9`](https://github.com/bitcoin/bips/blob/master/bip-0009.mediawiki): The changes allowing multiple soft-forks to be deployed in parallel have been implemented since **v0.12.1**  ([PR #7575](https://github.com/bitcoin/bitcoin/pull/7575))
